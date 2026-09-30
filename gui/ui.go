@@ -546,33 +546,30 @@ $("#nudgeRestart").onclick=async function(){
 };
 $("#updInstall").onclick=function(){ installUpdate(); };
 async function installUpdate(){
-  // Idempotent: nothing genuinely staged -> do nothing (kills the "click install
-  // repeatedly / almost-done loop").
   if(!last || !last.update_ready){ toast("You're on the latest version."); return; }
+  var target=last.update_ready;
   var ov=$("#updover"); ov.classList.add("show");
   $("#updtitle").textContent="Updating SelfGuard\u2026";
-  $("#updsub").textContent="Installing the new version and restarting.";
+  $("#updsub").textContent="Installing the new version\u2026";
   try{ await window.sgCommand("apply_update",""); }catch(e){}
-  await new Promise(function(r){ setTimeout(r,3000); });
-  $("#updsub").textContent="Finishing\u2026";
-  try{ await window.sgFinishUpdate(); }catch(e){}   // if the GUI relaunches, this process exits here
-  // GUI was already current (or handed off) -> wait for the service to finish its
-  // own swap, then hide the overlay. No misleading "reopen to finish" message.
-  var tries=0;
-  var iv=setInterval(async function(){
-    tries++;
+  // Wait for the SERVICE to reach the new version BEFORE relaunching the GUI, so
+  // the new window never opens on a mismatch and the banner can't reappear.
+  var svcDone=false;
+  for(var i=0;i<30;i++){
+    await new Promise(function(r){ setTimeout(r,1000); });
     try{
       var st=JSON.parse(await window.sgStatus());
       last=st;
-      if(!st.update_ready){ clearInterval(iv); ov.classList.remove("show"); render(st); return; }
+      if(st.version===target || !st.update_ready){ svcDone=true; break; }
     }catch(e){ /* service restarting */ }
-    if(tries>=25){ // ~25s: service update didn't complete
-      clearInterval(iv); ov.classList.remove("show");
-      $("#updtitle").textContent="Updating SelfGuard\u2026";
-      $("#updsub").textContent="Installing the new version and restarting.";
-      toast("Update didn't finish \u2014 it will retry automatically.","wait");
-    }
-  },1000);
+  }
+  $("#updsub").textContent="Finishing\u2026";
+  // Service is current now; apply the GUI update and relaunch (process exits here
+  // if the GUI was staged). If the GUI was already current, just hide and refresh.
+  try{ await window.sgFinishUpdate(); }catch(e){}
+  ov.classList.remove("show");
+  if(!svcDone){ toast("Update is taking longer than expected \u2014 it will finish shortly.","wait"); }
+  load();
 }
 $("#update").onclick=async function(){
   // If a verified update is already downloaded, install it. Otherwise ask the
