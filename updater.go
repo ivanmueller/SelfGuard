@@ -90,6 +90,20 @@ func parseVer(v string) ([]int, bool) {
 	return out, true
 }
 
+// fileSHA returns the lowercase-hex SHA-256 of a file, or "" if it can't be read.
+func fileSHA(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func fetchManifest() (*updateManifest, error) {
 	c := &http.Client{Timeout: 10 * time.Second}
 	resp, err := c.Get(manifestURL)
@@ -184,20 +198,36 @@ func (e *Engine) checkForUpdate() {
 		logf("update check: %v", err)
 		return
 	}
-	if !isNewer(m.Version, version) {
+	// The service is behind if its version is older OR its on-disk binary doesn't
+	// match the manifest. The GUI is behind if its on-disk binary doesn't match.
+	// Checking the GUI by hash (not by the service's version) is what lets a GUI
+	// that fell behind get pulled current even when the service is already up to
+	// date — otherwise a lagging GUI can never catch up.
+	svcBehind := isNewer(m.Version, version) || !strings.EqualFold(fileSHA(installedExe()), m.SvcSHA)
+	guiBehind := !strings.EqualFold(fileSHA(guiInstalledPath()), m.GuiSHA)
+	if !svcBehind && !guiBehind {
 		return
 	}
-	logf("update available: %s (running %s) - downloading", m.Version, version)
-	if err := stageVerified(svcURL, stagedSvc(), m.SvcSHA); err != nil {
-		logf("stage service: %v", err)
-		return
+	logf("update %s: svcBehind=%v guiBehind=%v", m.Version, svcBehind, guiBehind)
+	staged := false
+	if svcBehind {
+		if err := stageVerified(svcURL, stagedSvc(), m.SvcSHA); err != nil {
+			logf("stage service: %v", err)
+		} else {
+			staged = true
+		}
 	}
-	if err := stageVerified(guiURL, stagedGui(), m.GuiSHA); err != nil {
-		logf("stage gui: %v", err)
-		return
+	if guiBehind {
+		if err := stageVerified(guiURL, stagedGui(), m.GuiSHA); err != nil {
+			logf("stage gui: %v", err)
+		} else {
+			staged = true
+		}
 	}
-	_ = os.WriteFile(updateReadyFile(), []byte(m.Version), 0o644)
-	logf("update %s downloaded and verified; awaiting install", m.Version)
+	if staged {
+		_ = os.WriteFile(updateReadyFile(), []byte(m.Version), 0o644)
+		logf("update %s staged; awaiting install", m.Version)
+	}
 }
 
 // doCheckUpdate is the on-demand check behind the app's Update button. It reaches
@@ -226,10 +256,12 @@ func updateReadyVersion() string {
 		return ""
 	}
 	v := strings.TrimSpace(string(b))
-	if !isNewer(v, version) { // already running it (or stale) -> clear
+	if !isNewer(v, version) {
+		// The service is current, so the "install" banner isn't needed. Clear the
+		// marker and the staged SERVICE binary, but LEAVE the staged GUI: if the
+		// GUI is behind, it self-applies that file on its next launch.
 		_ = os.Remove(updateReadyFile())
 		_ = os.Remove(stagedSvc())
-		_ = os.Remove(stagedGui())
 		return ""
 	}
 	return v

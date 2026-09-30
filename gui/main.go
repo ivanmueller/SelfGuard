@@ -11,10 +11,69 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/jchv/go-webview2"
 	"github.com/kardianos/service"
+	"golang.org/x/sys/windows"
 )
+
+// --- window position restore across an update relaunch (Windows) ---
+var (
+	user32         = windows.NewLazySystemDLL("user32.dll")
+	pGetWindowRect = user32.NewProc("GetWindowRect")
+	pSetWindowPos  = user32.NewProc("SetWindowPos")
+	pSetForeground = user32.NewProc("SetForegroundWindow")
+	pShowWindow    = user32.NewProc("ShowWindow")
+)
+
+type winRect struct{ Left, Top, Right, Bottom int32 }
+
+func windowFile() string { return filepath.Join(dataDir(), "window.json") }
+
+// saveWindowForRestore records the window's rectangle so the next launch (after
+// an update relaunch) reopens it the same size and place. Written just before
+// relaunching; consumed once on the next start.
+func saveWindowForRestore(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	var r winRect
+	pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+	if r.Right-r.Left <= 0 || r.Bottom-r.Top <= 0 {
+		return
+	}
+	b, _ := json.Marshal(map[string]int32{
+		"x": r.Left, "y": r.Top, "w": r.Right - r.Left, "h": r.Bottom - r.Top, "restore": 1,
+	})
+	_ = os.MkdirAll(dataDir(), 0o755)
+	_ = os.WriteFile(windowFile(), b, 0o644)
+}
+
+// restoreWindowIfPending applies a saved rectangle ONCE (only when the restore
+// flag is set by an update relaunch), then clears it, so normal opens are
+// unaffected. Also brings the window to the front.
+func restoreWindowIfPending(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	b, err := os.ReadFile(windowFile())
+	if err != nil {
+		return
+	}
+	var m map[string]int32
+	if json.Unmarshal(b, &m) != nil || m["restore"] == 0 {
+		return
+	}
+	const swpNoZorder = 0x0004
+	const swShow = 5
+	pShowWindow.Call(hwnd, swShow)
+	pSetWindowPos.Call(hwnd, 0,
+		uintptr(uint32(m["x"])), uintptr(uint32(m["y"])),
+		uintptr(uint32(m["w"])), uintptr(uint32(m["h"])), swpNoZorder)
+	pSetForeground.Call(hwnd)
+	_ = os.Remove(windowFile()) // one-shot
+}
 
 const serviceExe = "selfguard-svc.exe"
 const appName = "SelfGuard"
@@ -188,10 +247,12 @@ func main() {
 	must("sgInstall", func() error { return sgInstall() })
 	must("sgGuiVersion", func() string { return version })
 	must("sgFinishUpdate", func() bool {
+		saveWindowForRestore(uintptr(w.Window())) // remember size/place for the reopen
 		if swapStagedGui() {
 			relaunchSelf() // process exits here; the new build takes over
 			return true
 		}
+		_ = os.Remove(windowFile()) // no relaunch -> don't reposition on next open
 		return false
 	})
 	must("sgRestartBrowser", func() error {
@@ -205,6 +266,7 @@ func main() {
 		_ = os.Remove(self + ".old") // cleanup after a GUI self-update
 	}
 
+	restoreWindowIfPending(uintptr(w.Window())) // reopen same size/place after an update
 	w.SetHtml(uiHTML)
 	w.Run()
 }
