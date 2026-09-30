@@ -371,13 +371,27 @@ async function api(kind,payload){
     await load();return o;
   }catch(e){toast("Couldn't reach the service.","err")}
 }
+var firstFail=0;
 async function load(){
-  var raw;try{raw=await window.sgStatus()}catch(e){return gate(await running())}
-  var s;try{s=JSON.parse(raw)}catch(e){return gate(await running())}
+  var raw;
+  try{raw=await window.sgStatus();}catch(e){ return softFail(); }
+  var s;try{s=JSON.parse(raw);}catch(e){ return softFail(); }
+  firstFail=0; hideConnecting();
   last=s;lastOK=Date.now();
   var g=$("#gate"); g.className=""; g.innerHTML=""; $("#main").style.display="flex";
   render(s);
 }
+// A brief status outage (service restarting during an update or at boot) shows a
+// calm "Connecting" screen instead of the alarming "Protection isn't running"
+// banner. Only a sustained outage (15s+) escalates to the real gate banner.
+async function softFail(){
+  if(!firstFail) firstFail=Date.now();
+  if(Date.now()-firstFail < 15000){ showConnecting(); return; }
+  hideConnecting();
+  gate(await running());
+}
+function showConnecting(){ var ov=$("#updover"); if(!ov)return; $("#updtitle").textContent="Connecting to protection\u2026"; $("#updsub").textContent="One moment while SelfGuard starts up."; ov.classList.add("show"); }
+function hideConnecting(){ var ov=$("#updover"); if(ov && $("#updtitle").textContent.indexOf("Connecting")===0) ov.classList.remove("show"); }
 async function running(){try{return await window.sgServiceRunning()}catch(e){return false}}
 function gate(isRunning){
   $("#main").style.display="none";var g=$("#gate");
