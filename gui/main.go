@@ -78,6 +78,18 @@ func restoreWindowIfPending(hwnd uintptr) {
 const serviceExe = "selfguard-svc.exe"
 const appName = "SelfGuard"
 
+// guiLog appends a line to gui.log so we can see what the GUI's self-update does
+// on launch and during an install (the service can't observe the GUI process).
+func guiLog(format string, a ...interface{}) {
+	f, err := os.OpenFile(filepath.Join(dataDir(), "gui.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(time.Now().Format("2006-01-02 15:04:05") + "  " + fmt.Sprintf(format, a...) + "\r\n")
+}
+
 // version is stamped at build time via -ldflags "-X main.version=1.6.0".
 var version = "dev"
 
@@ -176,22 +188,32 @@ func sgInstall() error {
 func swapStagedGui() bool {
 	self, err := os.Executable()
 	if err != nil {
+		guiLog("swapStagedGui: Executable() err=%v", err)
 		return false
 	}
 	staged := filepath.Join(filepath.Dir(self), "SelfGuard.new.exe")
 	if _, err := os.Stat(staged); err != nil {
+		guiLog("swapStagedGui: no staged GUI (%s): %v", staged, err)
 		return false // nothing staged
 	}
-	if os.Rename(self, self+".old") == nil { // folder writable
-		if os.Rename(staged, self) == nil {
+	guiLog("swapStagedGui: staged GUI present, attempting direct rename")
+	if e1 := os.Rename(self, self+".old"); e1 == nil { // folder writable
+		if e2 := os.Rename(staged, self); e2 == nil {
+			guiLog("swapStagedGui: direct swap OK")
 			return true
+		} else {
+			guiLog("swapStagedGui: move new->self failed: %v", e2)
+			_ = os.Rename(self+".old", self) // restore on failure
 		}
-		_ = os.Rename(self+".old", self) // restore on failure
+	} else {
+		guiLog("swapStagedGui: rename self->.old failed (locked?): %v", e1)
 	}
 	// Locked folder: let the SYSTEM service perform the swap.
+	guiLog("swapStagedGui: handing off to service apply_gui")
 	_, _ = sgCommand("apply_gui", "")
 	time.Sleep(2 * time.Second)
 	_, err = os.Stat(staged)
+	guiLog("swapStagedGui: after apply_gui, staged gone=%v", err != nil)
 	return err != nil // applied if the staged file is now gone
 }
 
@@ -208,11 +230,15 @@ func relaunchSelf() {
 // applyStagedGuiOnLaunch runs at startup: if a newer GUI is staged, install it
 // and relaunch so the app is always current when opened.
 func applyStagedGuiOnLaunch() {
+	guiLog("launch: GUI version %s starting; checking for staged update", version)
 	if self, err := os.Executable(); err == nil {
 		_ = os.Remove(self + ".old")
 	}
 	if swapStagedGui() {
+		guiLog("launch: staged GUI applied, relaunching")
 		relaunchSelf()
+	} else {
+		guiLog("launch: no staged GUI to apply")
 	}
 }
 
@@ -247,11 +273,14 @@ func main() {
 	must("sgInstall", func() error { return sgInstall() })
 	must("sgGuiVersion", func() string { return version })
 	must("sgFinishUpdate", func() bool {
+		guiLog("sgFinishUpdate: called (GUI %s)", version)
 		saveWindowForRestore(uintptr(w.Window())) // remember size/place for the reopen
 		if swapStagedGui() {
+			guiLog("sgFinishUpdate: GUI swapped, relaunching")
 			relaunchSelf() // process exits here; the new build takes over
 			return true
 		}
+		guiLog("sgFinishUpdate: nothing to swap; returning false")
 		_ = os.Remove(windowFile()) // no relaunch -> don't reposition on next open
 		return false
 	})
