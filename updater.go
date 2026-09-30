@@ -41,6 +41,9 @@ type updateManifest struct {
 func stagedSvc() string { return filepath.Join(installDir(), "selfguard-svc.new.exe") }
 func stagedGui() string { return filepath.Join(installDir(), "SelfGuard.new.exe") }
 
+// guiInstalledPath is where the GUI exe lives (beside the service).
+func guiInstalledPath() string { return filepath.Join(installDir(), "SelfGuard.exe") }
+
 // updateReadyFile records the version that is downloaded and staged, if any.
 func updateReadyFile() string { return filepath.Join(dataDir(), "update.ready") }
 

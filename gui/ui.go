@@ -137,6 +137,30 @@ const uiHTML = `<!DOCTYPE html>
   .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;font-size:13px;font-weight:600;padding:10px 16px;border-radius:11px;opacity:0;transition:opacity .2s,transform .2s;z-index:50;max-width:90vw;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.toast.err{background:var(--alert)}.toast.wait{background:var(--wait)}
   @media (prefers-reduced-motion:reduce){.ring,.hdot::after,.lockdot{animation:none}}
+
+  /* lockdown footer control + badge */
+  .lockbtn{font-family:var(--font);font-weight:700;font-size:13px;cursor:pointer;border-radius:10px;padding:9px 14px;border:1px solid var(--vault);background:#fff;color:var(--vault);user-select:none}
+  .lockbtn:hover{background:var(--guard-tint)}
+  .lockbadge{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;color:#fff;background:var(--vault);border-radius:999px;padding:7px 13px;letter-spacing:.03em}
+
+  /* full-window lockdown overlay */
+  #lockover{position:fixed;inset:0;background:radial-gradient(700px 400px at 50% 40%, #16463a, #0c2a22 80%);
+    display:none;flex-direction:column;align-items:center;justify-content:center;gap:22px;z-index:100;color:#fff;text-align:center}
+  #lockover.show{display:flex;animation:ovfade .25s ease}
+  @keyframes ovfade{from{opacity:0}to{opacity:1}}
+  .lockring-wrap{position:relative;width:180px;height:180px;display:grid;place-items:center}
+  .lockring{transform:rotate(-90deg)}
+  .lockring .track{fill:none;stroke:rgba(255,255,255,.12);stroke-width:8}
+  .lockring .prog{fill:none;stroke:var(--gold);stroke-width:8;stroke-linecap:round;
+    stroke-dasharray:502;stroke-dashoffset:502;transition:stroke-dashoffset .05s linear}
+  .lockglyph{position:absolute;color:#fff;transition:transform .3s ease}
+  #lockover.sealed .lockglyph{transform:scale(1.15)}
+  #lockover .ltitle{font-size:22px;font-weight:800;letter-spacing:.01em}
+  #lockover .lsub{font-size:13.5px;color:rgba(255,255,255,.75);max-width:34ch;line-height:1.5}
+  #lockover .lhint{font-size:12px;color:var(--gold);font-weight:700;letter-spacing:.08em}
+  .sealpulse{position:absolute;inset:0;border-radius:50%;border:2px solid var(--gold);opacity:0}
+  #lockover.sealed .sealpulse{animation:sealburst .6s ease-out}
+  @keyframes sealburst{0%{transform:scale(.7);opacity:.8}100%{transform:scale(1.6);opacity:0}}
   @media (max-width:820px){.body{grid-template-columns:1fr}.panel.adult{border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 </head>
@@ -243,10 +267,26 @@ const uiHTML = `<!DOCTYPE html>
 
     <div class="foot">
       <button class="btn danger" id="uninstall">Request uninstall (delayed)</button>
-      <span class="hint">Stricter changes are instant. Looser ones wait out the delay.</span>
+      <span id="lockslot"></span>
+      <span class="hint" style="flex:1">Stricter changes are instant. Looser ones wait out the delay.</span>
       <button class="btn ghost" id="update">Update…</button>
       <button class="btn ghost" id="refresh">Refresh</button>
     </div>
+  </div>
+
+  <!-- press-and-hold lockdown overlay -->
+  <div id="lockover">
+    <div class="lockring-wrap">
+      <svg class="lockring" width="180" height="180" viewBox="0 0 180 180">
+        <circle class="track" cx="90" cy="90" r="80"></circle>
+        <circle class="prog" id="lockprog" cx="90" cy="90" r="80"></circle>
+      </svg>
+      <span class="sealpulse"></span>
+      <svg class="lockglyph" width="54" height="60" viewBox="0 0 18 20" fill="none"><path d="M9 1 16.5 4v6c0 5-3.2 7.7-7.5 9C4.7 17.7 1.5 15 1.5 10V4L9 1Z" fill="rgba(255,255,255,.08)" stroke="#fff" stroke-width="1"/><rect x="6.2" y="9" width="5.6" height="4.2" rx="1" fill="#fff"/><path d="M7.3 9V7.6a1.7 1.7 0 0 1 3.4 0V9" stroke="#fff" stroke-width="1" fill="none"/></svg>
+    </div>
+    <div class="ltitle" id="locktitle">Hold to lock down</div>
+    <div class="lsub" id="locksub">Keep holding to seal this device. Removal will then require your recovery key — this is meant to be hard, on purpose.</div>
+    <div class="lhint" id="lockhint">PRESS AND HOLD</div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -298,6 +338,14 @@ function render(s){
     ub.style.display="flex";
     $("#updtxt").textContent="Update "+s.update_ready+" downloaded and verified — install when ready.";
   } else { ub.style.display="none"; }
+  // lockdown footer control reflects device state
+  var ls=$("#lockslot");
+  if(s.locked_down){
+    ls.innerHTML="<span class='lockbadge'>🔒 Device locked down</span>";
+  } else {
+    ls.innerHTML="<button class='lockbtn' id='lockbtn'>🔒 Lock down this device</button>";
+    var lb=$("#lockbtn"); if(lb) armHold(lb);
+  }
   // one-time "you were updated" note when the running version changed.
   try{
     var seen=window.__seenVer;
@@ -413,21 +461,17 @@ $("#reqInput").onkeydown=function(e){if(e.key==="Enter")$("#reqSend").click()};
 $("#delay").onchange=function(){api("set_delay",this.value)};
 $("#uninstall").onclick=function(){if(confirm("Request uninstall? If a delay is set, this waits it out before removing anything."))api("uninstall","")};
 $("#refresh").onclick=load;
-$("#updInstall").onclick=async function(){
+$("#updInstall").onclick=function(){ installUpdate(); };
+async function installUpdate(){
   toast("Installing the downloaded update…");
-  try{ var msg=await window.sgApplyUpdate(); if(msg!=="") toast(msg, /^ERROR/i.test(msg)?"err":""); }
+  try{ var o=JSON.parse(await window.sgCommand("apply_update","")); toast(o.message||"Installing…", o.ok?"":"err"); }
   catch(e){ toast("Install failed — try again.","err"); }
-  setTimeout(load,1500);
-};
+  setTimeout(load,3000);
+}
 $("#update").onclick=async function(){
   // If a verified update is already downloaded, install it. Otherwise ask the
   // service to check GitHub now. No local file search.
-  if(last && last.update_ready){
-    toast("Installing the downloaded update…");
-    try{ var m=await window.sgApplyUpdate(); if(m!=="") toast(m, /^ERROR/i.test(m)?"err":""); }
-    catch(e){ toast("Install failed — try again.","err"); }
-    setTimeout(load,1500); return;
-  }
+  if(last && last.update_ready){ installUpdate(); return; }
   toast("Checking for updates…");
   try{
     var o=JSON.parse(await window.sgCommand("check_update",""));
@@ -438,6 +482,32 @@ $("#update").onclick=async function(){
 
 // live "checked ago"
 setInterval(function(){var el=$("#ago");if(!lastOK){return}var s=Math.floor((Date.now()-lastOK)/1000);el.textContent=s<5?"just now":(s<60?s+"s ago":Math.floor(s/60)+"m ago")},1000);
+
+// ---- press-and-hold lockdown ----
+var HOLD_MS=2600, CIRC=502;
+function armHold(btn){
+  var over=$("#lockover"), prog=$("#lockprog");
+  var t0=0, raf=0, done=false;
+  function reset(){ over.className=""; prog.style.transition="stroke-dashoffset .2s ease"; prog.style.strokeDashoffset=CIRC;
+    $("#locktitle").textContent="Hold to lock down"; $("#lockhint").textContent="PRESS AND HOLD"; cancelAnimationFrame(raf); done=false; }
+  function tick(now){
+    var p=Math.min(1,(now-t0)/HOLD_MS);
+    prog.style.transition="none"; prog.style.strokeDashoffset=String(CIRC*(1-p));
+    $("#locktitle").textContent="Locking down…";
+    if(p<1){ raf=requestAnimationFrame(tick); } else if(!done){ done=true; seal(); }
+  }
+  function start(e){ e.preventDefault(); over.className="show"; $("#lockhint").textContent="KEEP HOLDING"; t0=performance.now(); raf=requestAnimationFrame(tick);
+    window.addEventListener("pointerup",end,{once:true}); window.addEventListener("pointercancel",end,{once:true}); }
+  function end(){ if(done) return; cancelAnimationFrame(raf); // released early
+    setTimeout(function(){ if(!done){ over.className=""; reset(); } },0); }
+  async function seal(){
+    over.className="show sealed"; $("#locktitle").textContent="DEVICE SECURED"; $("#lockhint").textContent="";
+    $("#locksub").textContent="This device is now locked down. Removal requires your recovery key — that's the point.";
+    try{ await window.sgCommand("lock_down",""); }catch(e){}
+    setTimeout(function(){ over.className=""; reset(); load(); }, 1600);
+  }
+  btn.addEventListener("pointerdown", start);
+}
 
 load();setInterval(load,5000);
 </script>

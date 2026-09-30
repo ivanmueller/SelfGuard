@@ -3,9 +3,11 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -218,4 +220,81 @@ func isAdmin() bool {
 		return true
 	}
 	return false
+}
+
+// ---- device lockdown (moved out of the old install-hardening.bat) ----
+
+// hardenedSDDL restricts the service so an interactive administrator can't stop
+// or delete it, while SYSTEM keeps full control (so the service can still update
+// and restart itself, and the documented recovery command can restore this).
+// This is the exact descriptor used by the previous hardening script and paired
+// with the restore command in RECOVERY-AND-MAINTENANCE.txt.
+const hardenedSDDL = "D:(D;;DCLCSWRPWPDTLOCRRC;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)"
+
+func lockdownMarker() string { return filepath.Join(dataDir(), "lockdown.on") }
+
+func lockdownActive() bool {
+	_, err := os.Stat(lockdownMarker())
+	return err == nil
+}
+
+// applyLockdown runs as SYSTEM (the service account). It restricts the service
+// against interactive-admin stop/delete, sets auto-restart on unexpected
+// termination, and locks the install folder to read-only for admins and users
+// (SYSTEM keeps full control so updates still work). It does NOT upload any key
+// anywhere and does NOT delete any recovery notes — removal stays possible with
+// the recovery command you keep offline.
+func applyLockdown() error {
+	_ = runCmd("sc", "sdset", appName, hardenedSDDL)
+	_ = runCmd("sc", "failure", appName, "reset=", "86400",
+		"actions=", "restart/2000/restart/5000/restart/10000")
+	dir := installDir()
+	_ = runCmd("icacls", dir, "/inheritance:r",
+		"/grant:r", "*S-1-5-18:(OI)(CI)F", // SYSTEM: full
+		"/grant:r", "*S-1-5-32-544:(OI)(CI)RX", // Administrators: read & execute
+		"/grant:r", "*S-1-5-32-545:(OI)(CI)RX", // Users: read & execute
+		"/setowner", "*S-1-5-18", "/T", "/C", "/Q")
+	if err := os.WriteFile(lockdownMarker(), []byte("on"), 0o644); err != nil {
+		return err
+	}
+	return nil
+}
+
+// swapAndRestart installs a staged, hash-verified update from within the service
+// (as SYSTEM). A running exe can't replace itself, so it spawns a DETACHED
+// SYSTEM helper that waits for the service to stop, moves the new binaries into
+// place (keeping .old backups), and starts the service again. Because the helper
+// runs as SYSTEM, this works even when the service is locked against admin stop.
+// Each staged file was already checked against the release manifest's SHA-256, so
+// only a genuine build is ever swapped in; the .old copies remain for recovery.
+func swapAndRestart(svcNew, svcDst, guiNew, guiDst, marker string) error {
+	ps := fmt.Sprintf(`Start-Sleep -Seconds 2
+sc.exe stop %[1]s | Out-Null
+$i=0; while((Get-Service %[1]s).Status -ne 'Stopped' -and $i -lt 30){ Start-Sleep -Seconds 1; $i++ }
+if(Test-Path '%[2]s'){
+  if(Test-Path ('%[3]s'+'.old')){ Remove-Item ('%[3]s'+'.old') -Force -ErrorAction SilentlyContinue }
+  if(Test-Path '%[3]s'){ Move-Item '%[3]s' ('%[3]s'+'.old') -Force }
+  Move-Item '%[2]s' '%[3]s' -Force
+}
+if(Test-Path '%[4]s'){
+  if(Test-Path ('%[5]s'+'.old')){ Remove-Item ('%[5]s'+'.old') -Force -ErrorAction SilentlyContinue }
+  if(Test-Path '%[5]s'){ Move-Item '%[5]s' ('%[5]s'+'.old') -Force }
+  Move-Item '%[4]s' '%[5]s' -Force
+}
+Remove-Item '%[6]s' -Force -ErrorAction SilentlyContinue
+sc.exe start %[1]s | Out-Null`, appName, svcNew, svcDst, guiNew, guiDst, marker)
+
+	dir := dataDir()
+	_ = os.MkdirAll(dir, 0o755)
+	ps1 := filepath.Join(dir, "apply-update.ps1")
+	if err := os.WriteFile(ps1, []byte(ps), 0o644); err != nil {
+		return err
+	}
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1)
+	// Detached so it survives the service stopping; hidden; own process group.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+	}
+	return cmd.Start()
 }

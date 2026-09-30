@@ -451,6 +451,24 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 		e.saveAndRebuild()
 		return fmt.Sprintf("Now blocking %s (effective now).", d), nil
 
+	case "lock_down":
+		if err := applyLockdown(); err != nil {
+			return "", fmt.Errorf("could not lock down: %w", err)
+		}
+		logf("device locked down")
+		return "Device locked down.", nil
+
+	case "apply_update":
+		v := updateReadyVersion()
+		if v == "" {
+			return "", fmt.Errorf("no verified update is staged")
+		}
+		if err := swapAndRestart(stagedSvc(), installedExe(), stagedGui(), guiInstalledPath(), updateReadyFile()); err != nil {
+			return "", fmt.Errorf("could not start the update: %w", err)
+		}
+		logf("applying update %s (service will restart)", v)
+		return fmt.Sprintf("Installing %s — the service will restart in a moment.", v), nil
+
 	case "request_site":
 		d := normDomain(payload)
 		if d == "" {

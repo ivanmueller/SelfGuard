@@ -106,70 +106,6 @@ func sgInstall() error {
 	return cmd.Run()
 }
 
-// serviceExePath is the fixed installed location of the service binary.
-func serviceExePath() string {
-	sd := os.Getenv("SystemDrive")
-	if sd == "" {
-		sd = "C:"
-	}
-	return sd + `\SelfGuard\selfguard-svc.exe`
-}
-
-// applyStagedScript installs the binaries the service already downloaded and
-// verified. %[1]s=result, %[2]s=staged svc, %[3]s=installed svc,
-// %[4]s=staged gui, %[5]s=installed gui.
-const applyStagedScript = `$ErrorActionPreference='Stop'
-$res='%[1]s'
-try{
-  if(Test-Path '%[2]s'){
-    sc.exe stop SelfGuard | Out-Null
-    $i=0; while((Get-Service SelfGuard).Status -ne 'Stopped' -and $i -lt 20){ Start-Sleep -Milliseconds 500; $i++ }
-    if((Get-Service SelfGuard).Status -ne 'Stopped'){ 'ERROR: could not stop the service (hardened against admin stop?). Restore the SDDL first.' | Out-File -Encoding utf8 $res; exit }
-    Move-Item '%[2]s' '%[3]s' -Force
-    sc.exe start SelfGuard | Out-Null
-  }
-  if(Test-Path '%[4]s'){
-    if(Test-Path ('%[5]s'+'.old')){ Remove-Item ('%[5]s'+'.old') -Force -ErrorAction SilentlyContinue }
-    if(Test-Path '%[5]s'){ Move-Item '%[5]s' ('%[5]s'+'.old') -Force }
-    Move-Item '%[4]s' '%[5]s' -Force
-  }
-  'OK: update installed. Close this window and reopen SelfGuard.' | Out-File -Encoding utf8 $res
-}catch{ ('ERROR: '+$_) | Out-File -Encoding utf8 $res }
-`
-
-// sgApplyUpdate installs the already-downloaded, hash-verified staged update in
-// one elevated step. No picker, no download — the service did that. It never
-// touches config, so your rules and delay lock carry over unchanged.
-func sgApplyUpdate() (string, error) {
-	dir := filepath.Dir(serviceExePath())
-	stagedSvc := filepath.Join(dir, "selfguard-svc.new.exe")
-	self, _ := os.Executable()
-	// GUI staged file lives beside the service; install it over the running GUI.
-	stagedGui := filepath.Join(dir, "SelfGuard.new.exe")
-
-	tmp, err := os.MkdirTemp("", "sgapply")
-	if err != nil {
-		return "", err
-	}
-	res := filepath.Join(tmp, "result.txt")
-	ps1 := filepath.Join(tmp, "apply.ps1")
-	body := fmt.Sprintf(applyStagedScript, res, stagedSvc, serviceExePath(), stagedGui, self)
-	if err := os.WriteFile(ps1, []byte(body), 0o644); err != nil {
-		return "", err
-	}
-	run := exec.Command("powershell", "-NoProfile", "-Command",
-		"Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','"+ps1+"' -Verb RunAs -Wait")
-	if err := run.Run(); err != nil {
-		return "", fmt.Errorf("install cancelled (admin prompt declined)")
-	}
-	b, _ := os.ReadFile(res)
-	msg := strings.TrimSpace(strings.TrimPrefix(string(b), "\ufeff"))
-	if msg == "" {
-		msg = "Update installed."
-	}
-	return msg, nil
-}
-
 func main() {
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug: false,
@@ -197,7 +133,6 @@ func main() {
 	must("sgCommand", sgCommand)
 	must("sgServiceRunning", func() bool { return serviceRunning() })
 	must("sgInstall", func() error { return sgInstall() })
-	must("sgApplyUpdate", sgApplyUpdate)
 
 	if self, e := os.Executable(); e == nil {
 		_ = os.Remove(self + ".old") // cleanup after a GUI self-update

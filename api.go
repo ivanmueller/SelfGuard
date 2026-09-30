@@ -80,6 +80,7 @@ type siteStatus struct {
 type statusResp struct {
 	Version     string          `json:"version"`
 	UpdateReady string          `json:"update_ready"` // staged version awaiting install, or ""
+	LockedDown  bool            `json:"locked_down"`  // device hardening applied
 	DelayHours  float64         `json:"delay_hours"`
 	Now         string          `json:"now"`
 	NetTimeOK   bool            `json:"net_time_ok"`

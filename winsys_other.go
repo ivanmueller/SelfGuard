@@ -19,3 +19,7 @@ func isAdmin() bool { return true }
 func serviceSetBinary(string) error     { return nil }
 func protectDataDir() error             { return nil }
 func removeInstallDirSoon(string) error { return nil }
+
+func applyLockdown() error                                               { return nil }
+func lockdownActive() bool                                               { return false }
+func swapAndRestart(svcNew, svcDst, guiNew, guiDst, marker string) error { return nil }
