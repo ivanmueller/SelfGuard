@@ -256,19 +256,14 @@ func applyLockdown() error {
 	_ = runCmd("sc", "failure", appName, "reset=", "86400",
 		"actions=", "restart/2000/restart/5000/restart/10000")
 
-	// 3) Lock the install folder. Order matters: take ownership FIRST, hand it to
-	// SYSTEM, THEN strip inheritance and set the read-only grants — otherwise
-	// icacls is refused and silently leaves the folder open (the earlier bug).
+	// 3) Lock the install folder using the .NET ACL method (Get-Acl/Set-Acl with
+	// SetAccessRuleProtection) rather than icacls. icacls /inheritance:r silently
+	// no-ops when run from the service's session (it "succeeds" but leaves the
+	// inherited entries in place); the .NET path reliably strips inheritance and
+	// sets an explicit ACL — this is the exact method that worked before.
 	dir := installDir()
-	_ = runCmd("takeown", "/F", dir, "/A", "/R", "/D", "Y")
-	_ = runCmd("icacls", dir, "/setowner", "*S-1-5-18", "/T", "/C")
-	if err := runCmd("icacls", dir, "/inheritance:r",
-		"/remove", "*S-1-5-11", // drop Authenticated Users
-		"/grant:r", "*S-1-5-18:(OI)(CI)F", // SYSTEM: full
-		"/grant:r", "*S-1-5-32-544:(OI)(CI)RX", // Administrators: read & execute
-		"/grant:r", "*S-1-5-32-545:(OI)(CI)RX", // Users: read & execute
-		"/T", "/C"); err != nil {
-		return fmt.Errorf("folder lock (icacls) failed: %w", err)
+	if err := lockFolderDotNet(dir); err != nil {
+		return fmt.Errorf("folder lock failed: %w", err)
 	}
 	// VERIFY the folder is actually locked before recording success.
 	if !folderLocked(dir) {
@@ -280,6 +275,28 @@ func applyLockdown() error {
 		return err
 	}
 	return nil
+}
+
+// lockFolderDotNet applies the read-only lockdown via the .NET ACL API, the same
+// approach that worked from the previous script: disable inheritance (converting
+// inherited rules to none), set SYSTEM as owner with Full control, and grant
+// Administrators and Users read & execute only. Applied recursively.
+func lockFolderDotNet(dir string) error {
+	ps := fmt.Sprintf(`$ErrorActionPreference='Stop'
+$dir='%s'
+$acl = Get-Acl $dir
+$acl.SetAccessRuleProtection($true,$false)          # disable inheritance, drop inherited rules
+foreach($r in @($acl.Access)){ [void]$acl.RemoveAccessRule($r) }   # clear any explicit rules too
+$sys = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+$adm = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+$usr = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
+$acl.SetOwner($sys)
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sys,'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adm,'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($usr,'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')))
+Set-Acl -Path $dir -AclObject $acl
+Get-ChildItem $dir -Recurse -Force | ForEach-Object { try { Set-Acl -Path $_.FullName -AclObject $acl } catch {} }`, dir)
+	return runCmd("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
 }
 
 // folderLocked confirms the install folder no longer inherits permissions and no
@@ -306,11 +323,10 @@ func folderLocked(dir string) bool {
 // Each staged file was already checked against the release manifest's SHA-256, so
 // only a genuine build is ever swapped in; the .old copies remain for recovery.
 func swapAndRestart(svcNew, svcDst, guiNew, guiDst, marker string) error {
-	// Copy (not move) the new files over the old, keeping .old backups, so a
-	// half-finished swap can never leave the service with no binary. Stale
-	// leftovers are cleared first (the "file already exists" failure). If the
-	// service doesn't come back up, the old binary is restored automatically.
-	ps := fmt.Sprintf(`Start-Sleep -Seconds 2
+	// The swap script: stop the service, copy the new binaries over the old
+	// (keeping .old backups so a failure can be rolled back), start it again,
+	// restore the old binary if it doesn't come back, then remove its own task.
+	swap := fmt.Sprintf(`Start-Sleep -Seconds 2
 sc.exe stop %[1]s | Out-Null
 $i=0; while((Get-Service %[1]s).Status -ne 'Stopped' -and $i -lt 30){ Start-Sleep -Seconds 1; $i++ }
 Remove-Item '%[3]s.old','%[5]s.old' -Force -ErrorAction SilentlyContinue
@@ -332,20 +348,31 @@ Start-Sleep -Seconds 2
 if((Get-Service %[1]s).Status -ne 'Running'){
   if(Test-Path '%[3]s.old'){ Copy-Item '%[3]s.old' '%[3]s' -Force }
   sc.exe start %[1]s | Out-Null
-}`, appName, svcNew, svcDst, guiNew, guiDst, marker)
+}
+Unregister-ScheduledTask -TaskName '%[1]sUpdate' -Confirm:$false -ErrorAction SilentlyContinue`,
+		appName, svcNew, svcDst, guiNew, guiDst, marker)
 
 	dir := dataDir()
 	_ = os.MkdirAll(dir, 0o755)
 	ps1 := filepath.Join(dir, "apply-update.ps1")
-	if err := os.WriteFile(ps1, []byte(ps), 0o644); err != nil {
+	if err := os.WriteFile(ps1, []byte(swap), 0o644); err != nil {
 		return err
 	}
-	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+	// Register a one-shot SYSTEM scheduled task to run the swap and start it now.
+	// This is the same Register-ScheduledTask-as-SYSTEM mechanism the recovery
+	// doc uses. It runs in its own session (a detached child of a service is
+	// blocked in session 0, which is why the previous approach silently failed),
+	// survives the service stopping, and runs as SYSTEM so it can stop even a
+	// hardened service and write the locked folder.
+	boot := fmt.Sprintf(`$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File "%s"';`+
+		`$p=New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest;`+
+		`Register-ScheduledTask -TaskName '%sUpdate' -Action $a -Principal $p -Force | Out-Null;`+
+		`Start-ScheduledTask -TaskName '%sUpdate'`, ps1, appName, appName)
+	if err := runCmd("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", boot); err != nil {
+		return fmt.Errorf("could not schedule the update task: %w", err)
 	}
-	return cmd.Start()
+	return nil
 }
 
 // sweepUpdateLeftovers clears incomplete downloads and stale swap files on start,
