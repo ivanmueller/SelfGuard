@@ -231,6 +231,11 @@ func isAdmin() bool {
 // with the restore command in RECOVERY-AND-MAINTENANCE.txt.
 const hardenedSDDL = "D:(D;;DCLCSWRPWPDTLOCRRC;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)"
 
+// restoreSDDL re-grants normal service control (admin can stop/delete again). It
+// matches the restore descriptor in RECOVERY-AND-MAINTENANCE.txt and is applied
+// briefly during a locked-down update so the service can be stopped for the swap.
+const restoreSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)"
+
 func lockdownMarker() string { return filepath.Join(dataDir(), "lockdown.on") }
 
 func lockdownActive() bool {
@@ -290,12 +295,12 @@ func applyLockdown() error {
 // approach that worked from the previous script: disable inheritance (converting
 // inherited rules to none), set SYSTEM as owner with Full control, and grant
 // Administrators and Users read & execute only. Applied recursively.
-func lockFolderDotNet(dir string) error {
-	ps := fmt.Sprintf(`$ErrorActionPreference='Stop'
-$dir='%s'
-$acl = Get-Acl $dir
-$acl.SetAccessRuleProtection($true,$false)          # disable inheritance, drop inherited rules
-foreach($r in @($acl.Access)){ [void]$acl.RemoveAccessRule($r) }   # clear any explicit rules too
+// folderLockScript returns the PowerShell that locks dir read-only to admins and
+// users (SYSTEM keeps full control), via the .NET ACL API.
+func folderLockScript(dir string) string {
+	return fmt.Sprintf(`$acl = Get-Acl '%s'
+$acl.SetAccessRuleProtection($true,$false)
+foreach($r in @($acl.Access)){ [void]$acl.RemoveAccessRule($r) }
 $sys = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
 $adm = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
 $usr = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
@@ -303,9 +308,13 @@ $acl.SetOwner($sys)
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sys,'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adm,'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($usr,'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')))
-Set-Acl -Path $dir -AclObject $acl
-Get-ChildItem $dir -Recurse -Force | ForEach-Object { try { Set-Acl -Path $_.FullName -AclObject $acl } catch {} }`, dir)
-	return runCmd("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
+Set-Acl -Path '%s' -AclObject $acl
+Get-ChildItem '%s' -Recurse -Force | ForEach-Object { try { Set-Acl -Path $_.FullName -AclObject $acl } catch {} }`, dir, dir, dir)
+}
+
+func lockFolderDotNet(dir string) error {
+	return runCmd("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+		"$ErrorActionPreference='Stop';"+folderLockScript(dir))
 }
 
 // folderLocked confirms the install folder no longer inherits permissions and no
@@ -332,12 +341,21 @@ func folderLocked(dir string) bool {
 // Each staged file was already checked against the release manifest's SHA-256, so
 // only a genuine build is ever swapped in; the .old copies remain for recovery.
 func swapAndRestart(svcNew, svcDst, marker string) error {
-	// The swap script: stop the service, copy the new binaries over the old
-	// (keeping .old backups so a failure can be rolled back), start it again,
-	// restore the old binary if it doesn't come back, then remove its own task.
-	swap := fmt.Sprintf(`Start-Sleep -Seconds 2
-sc.exe stop %[1]s | Out-Null
-$i=0; while((Get-Service %[1]s).Status -ne 'Stopped' -and $i -lt 30){ Start-Sleep -Seconds 1; $i++ }
+	// If the device is locked down, temporarily relax ONLY service control so the
+	// service can be stopped for the swap, then re-seal immediately. The folder is
+	// NOT unlocked (SYSTEM writes it while locked), so the only relaxed thing is
+	// service-control, for a few seconds. Minimal unprotected time by design.
+	wasLocked := lockdownActive()
+	preSDDL, postSDDL := "", ""
+	if wasLocked {
+		preSDDL = fmt.Sprintf("sc.exe sdset %s \"%s\" | Out-Null\n", appName, restoreSDDL)
+		postSDDL = fmt.Sprintf("sc.exe sdset %s \"%s\" | Out-Null\nsc.exe failure %s reset= 86400 actions= restart/2000/restart/5000/restart/10000 | Out-Null\n%s\n",
+			appName, hardenedSDDL, appName, folderLockScript(installDir()))
+	}
+	// %[5]s = pre-swap unlock (SDDL restore); %[6]s = post-swap re-seal.
+	swap := fmt.Sprintf(`$ErrorActionPreference='Continue'
+%[5]ssc.exe stop %[1]s | Out-Null
+$i=0; while((Get-Service %[1]s).Status -ne 'Stopped' -and $i -lt 25){ Start-Sleep -Milliseconds 400; $i++ }
 Remove-Item '%[3]s.old' -Force -ErrorAction SilentlyContinue
 try{
   if(Test-Path '%[2]s'){
@@ -348,13 +366,13 @@ try{
 }catch{}
 Remove-Item '%[4]s' -Force -ErrorAction SilentlyContinue
 sc.exe start %[1]s | Out-Null
-Start-Sleep -Seconds 2
+$j=0; while((Get-Service %[1]s).Status -ne 'Running' -and $j -lt 20){ Start-Sleep -Milliseconds 400; $j++ }
 if((Get-Service %[1]s).Status -ne 'Running'){
   if(Test-Path '%[3]s.old'){ Copy-Item '%[3]s.old' '%[3]s' -Force }
   sc.exe start %[1]s | Out-Null
 }
-Unregister-ScheduledTask -TaskName '%[1]sUpdate' -Confirm:$false -ErrorAction SilentlyContinue`,
-		appName, svcNew, svcDst, marker)
+%[6]sUnregister-ScheduledTask -TaskName '%[1]sUpdate' -Confirm:$false -ErrorAction SilentlyContinue`,
+		appName, svcNew, svcDst, marker, preSDDL, postSDDL)
 
 	dir := dataDir()
 	_ = os.MkdirAll(dir, 0o755)
