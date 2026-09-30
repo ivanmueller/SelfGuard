@@ -139,28 +139,34 @@ const uiHTML = `<!DOCTYPE html>
   @media (prefers-reduced-motion:reduce){.ring,.hdot::after,.lockdot{animation:none}}
 
   /* lockdown footer control + badge */
-  .lockbtn{font-family:var(--font);font-weight:700;font-size:13px;cursor:pointer;border-radius:10px;padding:9px 14px;border:1px solid var(--vault);background:#fff;color:var(--vault);user-select:none}
+  .lockbtn{font-family:var(--font);font-weight:800;font-size:11.5px;letter-spacing:.03em;cursor:pointer;border-radius:999px;padding:6px 13px;border:1px solid var(--vault);background:#fff;color:var(--vault);user-select:none;display:inline-flex;align-items:center;gap:7px}
   .lockbtn:hover{background:var(--guard-tint)}
-  .lockbadge{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;color:#fff;background:var(--vault);border-radius:999px;padding:7px 13px;letter-spacing:.03em}
+  .lockbadge{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;color:#fff;background:var(--vault);border-radius:999px;padding:6px 12px;letter-spacing:.04em}
 
-  /* full-window lockdown overlay */
-  #lockover{position:fixed;inset:0;background:radial-gradient(700px 400px at 50% 40%, #16463a, #0c2a22 80%);
-    display:none;flex-direction:column;align-items:center;justify-content:center;gap:22px;z-index:100;color:#fff;text-align:center}
-  #lockover.show{display:flex;animation:ovfade .25s ease}
+  /* deep-lockdown sequence overlay */
+  #lockover{position:fixed;inset:0;background:#06120e;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:100;color:#e7fff4;overflow:hidden;font-family:ui-monospace,"Cascadia Mono","Consolas",monospace}
+  #lockover.show{display:flex}
+  #lockstream{position:absolute;inset:0;pointer-events:none;opacity:.10;color:#3fe0a2;font-size:12px;line-height:1.15;white-space:pre;overflow:hidden}
+  .lock-scan{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);top:0;animation:scan 2.4s linear infinite;opacity:.7}
+  @keyframes scan{0%{top:0}100%{top:100%}}
+  .lock-console{position:relative;z-index:2;width:min(560px,88vw);border:1px solid rgba(63,224,162,.35);border-radius:12px;background:rgba(6,20,15,.85);box-shadow:0 0 40px rgba(63,224,162,.12)}
+  .lc-head{font-size:11px;font-weight:800;letter-spacing:.18em;color:var(--gold);padding:11px 16px;border-bottom:1px solid rgba(63,224,162,.25)}
+  #lclog{margin:0;padding:14px 16px;min-height:150px;font-size:12.5px;line-height:1.7;color:#8ff0c7;white-space:pre-wrap}
+  #lclog .ok{color:var(--gold)}
+  .lc-bar{height:6px;margin:0 16px 12px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+  .lc-fill{height:100%;width:0;background:linear-gradient(90deg,#3fe0a2,var(--gold));transition:width .06s linear}
+  .lc-hint{text-align:center;font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--gold);padding:0 0 14px}
+  #lcseal{position:absolute;inset:0;z-index:3;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:radial-gradient(600px 380px at 50% 45%,#123a2c,#06120e 85%)}
+  #lockover.sealed #lcseal{display:flex;animation:ovfade .3s ease}
+  #lockover.sealed .lock-console,#lockover.sealed .lock-scan{display:none}
   @keyframes ovfade{from{opacity:0}to{opacity:1}}
-  .lockring-wrap{position:relative;width:180px;height:180px;display:grid;place-items:center}
-  .lockring{transform:rotate(-90deg)}
-  .lockring .track{fill:none;stroke:rgba(255,255,255,.12);stroke-width:8}
-  .lockring .prog{fill:none;stroke:var(--gold);stroke-width:8;stroke-linecap:round;
-    stroke-dasharray:502;stroke-dashoffset:502;transition:stroke-dashoffset .05s linear}
-  .lockglyph{position:absolute;color:#fff;transition:transform .3s ease}
-  #lockover.sealed .lockglyph{transform:scale(1.15)}
-  #lockover .ltitle{font-size:22px;font-weight:800;letter-spacing:.01em}
-  #lockover .lsub{font-size:13.5px;color:rgba(255,255,255,.75);max-width:34ch;line-height:1.5}
-  #lockover .lhint{font-size:12px;color:var(--gold);font-weight:700;letter-spacing:.08em}
-  .sealpulse{position:absolute;inset:0;border-radius:50%;border:2px solid var(--gold);opacity:0}
-  #lockover.sealed .sealpulse{animation:sealburst .6s ease-out}
-  @keyframes sealburst{0%{transform:scale(.7);opacity:.8}100%{transform:scale(1.6);opacity:0}}
+  .seal-badge{position:relative;width:150px;height:150px;display:grid;place-items:center}
+  .seal-badge .ring{position:absolute;inset:0;border-radius:50%;border:2px solid var(--gold)}
+  .seal-badge .ring.b{animation:sealburst .7s ease-out}
+  @keyframes sealburst{0%{transform:scale(.7);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+  .seal-title{font-family:var(--font);font-size:24px;font-weight:800;letter-spacing:.02em;color:#fff}
+  .seal-sub{font-family:var(--font);font-size:13px;color:rgba(255,255,255,.7);max-width:36ch;text-align:center;line-height:1.5}
+  .seal-tag{font-size:11px;font-weight:800;letter-spacing:.22em;color:var(--gold)}
   @media (max-width:820px){.body{grid-template-columns:1fr}.panel.adult{border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 </head>
@@ -183,6 +189,7 @@ const uiHTML = `<!DOCTYPE html>
           <option value="48">48 hours</option><option value="72">72 hours</option>
         </select>
       </div>
+      <span id="lockslot"></span>
     </div>
 
     <div class="body">
@@ -267,26 +274,31 @@ const uiHTML = `<!DOCTYPE html>
 
     <div class="foot">
       <button class="btn danger" id="uninstall">Request uninstall (delayed)</button>
-      <span id="lockslot"></span>
       <span class="hint" style="flex:1">Stricter changes are instant. Looser ones wait out the delay.</span>
       <button class="btn ghost" id="update">Update…</button>
       <button class="btn ghost" id="refresh">Refresh</button>
     </div>
   </div>
 
-  <!-- press-and-hold lockdown overlay -->
+  <!-- deep-lockdown sequence overlay -->
   <div id="lockover">
-    <div class="lockring-wrap">
-      <svg class="lockring" width="180" height="180" viewBox="0 0 180 180">
-        <circle class="track" cx="90" cy="90" r="80"></circle>
-        <circle class="prog" id="lockprog" cx="90" cy="90" r="80"></circle>
-      </svg>
-      <span class="sealpulse"></span>
-      <svg class="lockglyph" width="54" height="60" viewBox="0 0 18 20" fill="none"><path d="M9 1 16.5 4v6c0 5-3.2 7.7-7.5 9C4.7 17.7 1.5 15 1.5 10V4L9 1Z" fill="rgba(255,255,255,.08)" stroke="#fff" stroke-width="1"/><rect x="6.2" y="9" width="5.6" height="4.2" rx="1" fill="#fff"/><path d="M7.3 9V7.6a1.7 1.7 0 0 1 3.4 0V9" stroke="#fff" stroke-width="1" fill="none"/></svg>
+    <div id="lockstream"></div>
+    <div class="lock-scan"></div>
+    <div class="lock-console">
+      <div class="lc-head">SELFGUARD // SYSTEM LOCKDOWN</div>
+      <pre id="lclog"></pre>
+      <div class="lc-bar"><div class="lc-fill" id="lcfill"></div></div>
+      <div class="lc-hint" id="lchint">PRESS AND HOLD TO ENGAGE</div>
     </div>
-    <div class="ltitle" id="locktitle">Hold to lock down</div>
-    <div class="lsub" id="locksub">Keep holding to seal this device. Removal will then require your recovery key — this is meant to be hard, on purpose.</div>
-    <div class="lhint" id="lockhint">PRESS AND HOLD</div>
+    <div id="lcseal">
+      <div class="seal-badge">
+        <span class="ring"></span><span class="ring b"></span>
+        <svg width="60" height="66" viewBox="0 0 18 20" fill="none"><path d="M9 1 16.5 4v6c0 5-3.2 7.7-7.5 9C4.7 17.7 1.5 15 1.5 10V4L9 1Z" fill="rgba(201,162,75,.10)" stroke="#C9A24B" stroke-width="1"/><rect x="6" y="9" width="6" height="4.6" rx="1" fill="#C9A24B"/><path d="M7.2 9V7.4a1.8 1.8 0 0 1 3.6 0V9" stroke="#C9A24B" stroke-width="1.1" fill="none"/></svg>
+      </div>
+      <div class="seal-tag">RESTRICTION ENFORCED</div>
+      <div class="seal-title">DEVICE FULLY LOCKED DOWN</div>
+      <div class="seal-sub" id="sealsub">This device is sealed. Removal now requires your recovery key.</div>
+    </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -483,37 +495,34 @@ $("#update").onclick=async function(){
 // live "checked ago"
 setInterval(function(){var el=$("#ago");if(!lastOK){return}var s=Math.floor((Date.now()-lastOK)/1000);el.textContent=s<5?"just now":(s<60?s+"s ago":Math.floor(s/60)+"m ago")},1000);
 
-// ---- press-and-hold lockdown ----
-var HOLD_MS=2600, CIRC=502;
+// ---- deep-lockdown press-and-hold sequence ----
+var HOLD_MS=3200;
+var LOCK_STEPS=["acquiring SYSTEM privileges","sealing service control  [SDDL]","revoking write access  ::  C:\\SelfGuard","enforcing DNS + policy layer","writing restriction manifest"];
+function hex(n){var s="";for(var i=0;i<n;i++)s+="0123456789abcdef"[Math.floor(Math.random()*16)];return s}
+function startStream(){var el=$("#lockstream");if(el._on)return;el._on=true;var cols=Math.floor((el.clientWidth||900)/9);
+  el._iv=setInterval(function(){var l="";for(var i=0;i<cols;i++)l+=(Math.random()<.5?"0":"1");el.textContent=(el.textContent+"\n"+l).split("\n").slice(-60).join("\n");},70);}
+function stopStream(){var el=$("#lockstream");if(el._iv){clearInterval(el._iv);el._on=false;el._iv=null;}el.textContent="";}
 function armHold(btn){
-  var over=$("#lockover"), prog=$("#lockprog");
-  var t0=0, raf=0, done=false;
-  function reset(){ over.className=""; prog.style.transition="stroke-dashoffset .2s ease"; prog.style.strokeDashoffset=CIRC;
-    $("#locktitle").textContent="Hold to lock down"; $("#lockhint").textContent="PRESS AND HOLD"; cancelAnimationFrame(raf); done=false; }
-  function tick(now){
-    var p=Math.min(1,(now-t0)/HOLD_MS);
-    prog.style.transition="none"; prog.style.strokeDashoffset=String(CIRC*(1-p));
-    $("#locktitle").textContent="Locking down…";
-    if(p<1){ raf=requestAnimationFrame(tick); } else if(!done){ done=true; seal(); }
-  }
-  function start(e){ e.preventDefault(); over.className="show"; $("#lockhint").textContent="KEEP HOLDING"; t0=performance.now(); raf=requestAnimationFrame(tick);
+  var over=$("#lockover"), log=$("#lclog"), fill=$("#lcfill");
+  var t0=0, raf=0, done=false, shown=0;
+  function reset(){ over.className=""; log.innerHTML=""; fill.style.width="0"; shown=0; done=false;
+    $("#lchint").textContent="PRESS AND HOLD TO ENGAGE"; cancelAnimationFrame(raf); stopStream(); }
+  function line(txt,ok){ var sp=document.createElement("span"); sp.className=ok?"ok":"";
+    sp.textContent="> "+txt+"  "+hex(6)+(ok?"  [ ok ]":"")+"\n"; log.appendChild(sp); log.scrollTop=log.scrollHeight; }
+  function tick(now){ var p=Math.min(1,(now-t0)/HOLD_MS); fill.style.width=(p*100).toFixed(1)+"%";
+    var want=Math.floor(p*LOCK_STEPS.length); while(shown<want && shown<LOCK_STEPS.length){ line(LOCK_STEPS[shown],true); shown++; }
+    if(p<1){ raf=requestAnimationFrame(tick); } else if(!done){ done=true; seal(); } }
+  function start(e){ e.preventDefault(); over.className="show"; startStream(); $("#lchint").textContent="KEEP HOLDING…";
+    log.innerHTML=""; shown=0; line("initializing lockdown sequence"); t0=performance.now(); raf=requestAnimationFrame(tick);
     window.addEventListener("pointerup",end,{once:true}); window.addEventListener("pointercancel",end,{once:true}); }
-  function end(){ if(done) return; cancelAnimationFrame(raf); // released early
-    setTimeout(function(){ if(!done){ over.className=""; reset(); } },0); }
-  async function seal(){
-    $("#locktitle").textContent="Sealing…"; $("#lockhint").textContent="";
-    var ok=false;
+  function end(){ if(done) return; cancelAnimationFrame(raf); line("SEQUENCE ABORTED — no changes made");
+    $("#lchint").textContent="RELEASED"; setTimeout(function(){ if(!done) reset(); }, 700); }
+  async function seal(){ $("#lchint").textContent="COMMITTING…"; var ok=false;
     try{ var o=JSON.parse(await window.sgCommand("lock_down","")); ok=!!o.ok; }catch(e){ ok=false; }
-    if(ok){
-      over.className="show sealed"; $("#locktitle").textContent="DEVICE SECURED";
-      $("#locksub").textContent="This device is now locked down. Removal requires your recovery key — that's the point.";
-      setTimeout(function(){ over.className=""; reset(); load(); }, 1600);
-    } else {
-      $("#locktitle").textContent="Couldn't lock down"; $("#lockhint").textContent="TRY AGAIN";
-      $("#locksub").textContent="The lockdown command didn't go through. Nothing was changed.";
-      setTimeout(function(){ over.className=""; reset(); load(); }, 1800);
-    }
-  }
+    if(ok){ line("restriction manifest committed",true); over.className="show sealed";
+      setTimeout(function(){ over.className=""; reset(); load(); }, 2400); }
+    else { line("LOCKDOWN FAILED — nothing was changed"); $("#lchint").textContent="FAILED — TRY AGAIN";
+      setTimeout(function(){ over.className=""; reset(); load(); }, 2000); } }
   btn.addEventListener("pointerdown", start);
 }
 
