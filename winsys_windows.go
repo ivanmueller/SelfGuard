@@ -331,27 +331,22 @@ func folderLocked(dir string) bool {
 // runs as SYSTEM, this works even when the service is locked against admin stop.
 // Each staged file was already checked against the release manifest's SHA-256, so
 // only a genuine build is ever swapped in; the .old copies remain for recovery.
-func swapAndRestart(svcNew, svcDst, guiNew, guiDst, marker string) error {
+func swapAndRestart(svcNew, svcDst, marker string) error {
 	// The swap script: stop the service, copy the new binaries over the old
 	// (keeping .old backups so a failure can be rolled back), start it again,
 	// restore the old binary if it doesn't come back, then remove its own task.
 	swap := fmt.Sprintf(`Start-Sleep -Seconds 2
 sc.exe stop %[1]s | Out-Null
 $i=0; while((Get-Service %[1]s).Status -ne 'Stopped' -and $i -lt 30){ Start-Sleep -Seconds 1; $i++ }
-Remove-Item '%[3]s.old','%[5]s.old' -Force -ErrorAction SilentlyContinue
+Remove-Item '%[3]s.old' -Force -ErrorAction SilentlyContinue
 try{
   if(Test-Path '%[2]s'){
     Copy-Item '%[3]s' '%[3]s.old' -Force -ErrorAction SilentlyContinue
     Copy-Item '%[2]s' '%[3]s' -Force
     Remove-Item '%[2]s' -Force -ErrorAction SilentlyContinue
   }
-  if(Test-Path '%[4]s'){
-    Remove-Item '%[5]s.old' -Force -ErrorAction SilentlyContinue
-    if(Test-Path '%[5]s'){ Move-Item '%[5]s' '%[5]s.old' -Force }  # rename running GUI (allowed)
-    Move-Item '%[4]s' '%[5]s' -Force                               # drop new GUI into place
-  }
 }catch{}
-Remove-Item '%[6]s' -Force -ErrorAction SilentlyContinue
+Remove-Item '%[4]s' -Force -ErrorAction SilentlyContinue
 sc.exe start %[1]s | Out-Null
 Start-Sleep -Seconds 2
 if((Get-Service %[1]s).Status -ne 'Running'){
@@ -359,7 +354,7 @@ if((Get-Service %[1]s).Status -ne 'Running'){
   sc.exe start %[1]s | Out-Null
 }
 Unregister-ScheduledTask -TaskName '%[1]sUpdate' -Confirm:$false -ErrorAction SilentlyContinue`,
-		appName, svcNew, svcDst, guiNew, guiDst, marker)
+		appName, svcNew, svcDst, marker)
 
 	dir := dataDir()
 	_ = os.MkdirAll(dir, 0o755)
@@ -384,6 +379,22 @@ Unregister-ScheduledTask -TaskName '%[1]sUpdate' -Confirm:$false -ErrorAction Si
 	return nil
 }
 
+// swapGuiOnly renames the (possibly running) GUI aside and moves the staged new
+// GUI into place. Called as SYSTEM via apply_gui so it works even when the
+// install folder is locked and the user's GUI process can't write it.
+func swapGuiOnly(guiNew, guiDst string) error {
+	if _, err := os.Stat(guiNew); err != nil {
+		return err
+	}
+	_ = os.Remove(guiDst + ".old")
+	if _, err := os.Stat(guiDst); err == nil {
+		if err := os.Rename(guiDst, guiDst+".old"); err != nil {
+			return err
+		}
+	}
+	return os.Rename(guiNew, guiDst)
+}
+
 // sweepUpdateLeftovers clears incomplete downloads and stale swap files on start,
 // so a previous failed update self-heals rather than colliding next time.
 func sweepUpdateLeftovers() {
@@ -396,3 +407,7 @@ func sweepUpdateLeftovers() {
 		}
 	}
 }
+
+// flushDNS clears the Windows DNS resolver cache so a rule change takes effect
+// immediately for new lookups.
+func flushDNS() { _ = runCmd("ipconfig", "/flushdns") }

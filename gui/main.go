@@ -106,7 +106,46 @@ func sgInstall() error {
 	return cmd.Run()
 }
 
+// applyStagedGuiOnLaunch makes "open the app" always current: if the service has
+// staged a newer GUI (SelfGuard.new.exe), install it now and relaunch. It tries
+// a direct rename first (works when the folder is writable); if that's refused
+// (device locked down), it asks the SYSTEM service to do the swap, then relaunches.
+// Either way the staged file is consumed, so this never loops.
+func applyStagedGuiOnLaunch() {
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(self + ".old") // clean up a prior swap
+	staged := filepath.Join(filepath.Dir(self), "SelfGuard.new.exe")
+	if _, err := os.Stat(staged); err != nil {
+		return // nothing staged
+	}
+	applied := false
+	if os.Rename(self, self+".old") == nil { // direct (folder writable)
+		if os.Rename(staged, self) == nil {
+			applied = true
+		} else {
+			_ = os.Rename(self+".old", self) // restore on failure
+		}
+	}
+	if !applied { // locked folder -> let the SYSTEM service do it
+		_, _ = sgCommand("apply_gui", "")
+		time.Sleep(2 * time.Second)
+		if _, err := os.Stat(staged); err == nil {
+			return // service didn't apply it; keep running the current build
+		}
+		applied = true
+	}
+	if applied {
+		_ = exec.Command(self).Start()
+		os.Exit(0)
+	}
+}
+
 func main() {
+	applyStagedGuiOnLaunch() // self-update the GUI if the service staged a newer one
+
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug: false,
 		WindowOptions: webview2.WindowOptions{
@@ -133,6 +172,13 @@ func main() {
 	must("sgCommand", sgCommand)
 	must("sgServiceRunning", func() bool { return serviceRunning() })
 	must("sgInstall", func() error { return sgInstall() })
+	must("sgGuiVersion", func() string { return version })
+	must("sgRestartBrowser", func() error {
+		// User-initiated only. Launches Chrome to chrome://restart, which makes a
+		// running Chrome restart itself and drop cached pages. We never force-kill
+		// the browser from the background.
+		return exec.Command("cmd", "/c", "start", "", "chrome", "chrome://restart").Start()
+	})
 
 	if self, e := os.Executable(); e == nil {
 		_ = os.Remove(self + ".old") // cleanup after a GUI self-update

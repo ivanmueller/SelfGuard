@@ -20,7 +20,9 @@ func serviceSetBinary(string) error     { return nil }
 func protectDataDir() error             { return nil }
 func removeInstallDirSoon(string) error { return nil }
 
-func applyLockdown() error                                               { return nil }
-func lockdownActive() bool                                               { return false }
-func swapAndRestart(svcNew, svcDst, guiNew, guiDst, marker string) error { return nil }
-func sweepUpdateLeftovers()                                              {}
+func applyLockdown() error                               { return nil }
+func lockdownActive() bool                               { return false }
+func swapAndRestart(svcNew, svcDst, marker string) error { return nil }
+func swapGuiOnly(guiNew, guiDst string) error            { return nil }
+func sweepUpdateLeftovers()                              {}
+func flushDNS() {}

@@ -137,6 +137,9 @@ const uiHTML = `<!DOCTYPE html>
   .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;font-size:13px;font-weight:600;padding:10px 16px;border-radius:11px;opacity:0;transition:opacity .2s,transform .2s;z-index:50;max-width:90vw;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.toast.err{background:var(--alert)}.toast.wait{background:var(--wait)}
   @media (prefers-reduced-motion:reduce){.ring,.hdot::after,.lockdot{animation:none}}
+  #nudge{display:none;align-items:center;gap:12px;padding:10px 20px;background:var(--wait-tint);border-bottom:1px solid #EAD6A6;color:#5c471a;font-size:12.5px;font-weight:600}
+  #nudge.show{display:flex}
+  #nudge .x{margin-left:6px;color:#8a6d2a;cursor:pointer;font-weight:800;padding:0 6px}
 
   /* lockdown footer control + badge */
   .lockbtn{font-family:var(--font);font-weight:800;font-size:11.5px;letter-spacing:.03em;cursor:pointer;border-radius:999px;padding:6px 13px;border:1px solid var(--vault);background:#fff;color:var(--vault);user-select:none;display:inline-flex;align-items:center;gap:7px}
@@ -177,6 +180,11 @@ const uiHTML = `<!DOCTYPE html>
     <div id="updbar" style="display:none;align-items:center;gap:12px;padding:11px 20px;background:var(--guard-tint);border-bottom:1px solid #bfe0d1;color:var(--guard-deep);font-size:13px;font-weight:600">
       <span id="updtxt"></span>
       <button class="btn primary" id="updInstall" style="margin-left:auto;padding:7px 13px">Install &amp; restart</button>
+    </div>
+    <div id="nudge">
+      <span>Blocking changed \u2014 restart your browser to clear cached pages.</span>
+      <button class="btn primary" id="nudgeRestart" style="margin-left:auto;padding:6px 12px">Restart Chrome</button>
+      <span class="x" id="nudgeClose" title="dismiss">\u2715</span>
     </div>
     <div class="status">
       <span class="badge"><span class="dot" id="dot"></span><span id="badgeText">—</span></span>
@@ -274,7 +282,7 @@ const uiHTML = `<!DOCTYPE html>
 
     <div class="foot">
       <button class="btn danger" id="uninstall">Request uninstall (delayed)</button>
-      <span class="hint" style="flex:1">Stricter changes are instant. Looser ones wait out the delay.</span>
+      <span class="hint" style="flex:1">Stricter changes are instant. Looser ones wait out the delay. <span id="ver" style="color:var(--ink-faint)"></span></span>
       <button class="btn ghost" id="update">Update…</button>
       <button class="btn ghost" id="refresh">Refresh</button>
     </div>
@@ -320,10 +328,18 @@ function togglesFromLevel(l){return{block:l==="blocked",img:(l==="noimages"||l==
 function statusOf(l){switch(l){case"blocked":return["Blocked","st-blocked"];case"text":return["Text only","st-text"];
   case"noimages":return["No images","st-noimg"];case"novideo":return["Videos hidden","st-novid"];default:return["Allowed","st-allowed"]}}
 
+var TIGHTEN={block_domain:1,enable_category:1,add_site:1,lock_down:1};
+function maybeNudge(kind,payload,ok){
+  if(!ok) return;
+  var t=TIGHTEN[kind];
+  if(kind==="set_site_level"){ try{ var o=JSON.parse(payload); if(o.level!=="allowed") t=1; }catch(e){} }
+  if(t){ $("#nudge").classList.add("show"); }
+}
 async function api(kind,payload){
   try{var r=await window.sgCommand(kind,payload||"");var o=JSON.parse(r);
     if(!o.ok){toast(o.message||"That didn't go through.","err");}
     else if(o.message){toast(o.message.split("\n")[0], /queued|waits|delay/i.test(o.message)?"wait":"");}
+    maybeNudge(kind,payload,o.ok);
     await load();return o;
   }catch(e){toast("Couldn't reach the service.","err")}
 }
@@ -344,6 +360,8 @@ function gate(isRunning){
 
 function render(s){
   var setup=s.delay_hours===0;
+  // version label (fetch GUI build once; flag if service is a different version)
+  try{ if(window.__guiver===undefined){ window.__guiver=null; window.sgGuiVersion().then(function(v){window.__guiver=v;paintVer(s);}); } else { paintVer(s); } }catch(e){}
   // update banner: a newer build is downloaded and verified, waiting to install.
   var ub=$("#updbar");
   if(s.update_ready){
@@ -392,6 +410,11 @@ function animateCount(el,target){
   var start=performance.now(),dur=900;
   function tick(now){var p=Math.min(1,(now-start)/dur),e=1-Math.pow(1-p,3);el.textContent=Math.round(from+(target-from)*e).toLocaleString();if(p<1)requestAnimationFrame(tick)}
   requestAnimationFrame(tick);
+}
+function paintVer(s){
+  var el=$("#ver"); if(!el) return;
+  var gv=window.__guiver||"?", sv=(s&&s.version)||"?";
+  el.textContent=(gv===sv)?("v"+gv):("app v"+gv+" \u00b7 service v"+sv+" \u2014 reopen to finish update");
 }
 function renderTiles(sites){
   var g=$("#tiles");g.innerHTML="";
@@ -473,6 +496,12 @@ $("#reqInput").onkeydown=function(e){if(e.key==="Enter")$("#reqSend").click()};
 $("#delay").onchange=function(){api("set_delay",this.value)};
 $("#uninstall").onclick=function(){if(confirm("Request uninstall? If a delay is set, this waits it out before removing anything."))api("uninstall","")};
 $("#refresh").onclick=load;
+$("#nudgeClose").onclick=function(){ $("#nudge").classList.remove("show"); };
+$("#nudgeRestart").onclick=async function(){
+  try{ await window.sgRestartBrowser(); toast("Restarting Chrome\u2026"); }
+  catch(e){ toast("Couldn't launch Chrome \u2014 restart it manually (chrome://restart).","err"); }
+  $("#nudge").classList.remove("show");
+};
 $("#updInstall").onclick=function(){ installUpdate(); };
 async function installUpdate(){
   toast("Installing the downloaded update…");

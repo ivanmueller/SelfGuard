@@ -459,12 +459,19 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 		logf("device locked down")
 		return "Device locked down.", nil
 
+	case "apply_gui":
+		if err := swapGuiOnly(stagedGui(), guiInstalledPath()); err != nil {
+			return "", fmt.Errorf("gui swap failed: %w", err)
+		}
+		logf("gui updated via apply_gui")
+		return "GUI updated.", nil
+
 	case "apply_update":
 		v := updateReadyVersion()
 		if v == "" {
 			return "", fmt.Errorf("no verified update is staged")
 		}
-		if err := swapAndRestart(stagedSvc(), installedExe(), stagedGui(), guiInstalledPath(), updateReadyFile()); err != nil {
+		if err := swapAndRestart(stagedSvc(), installedExe(), updateReadyFile()); err != nil {
 			return "", fmt.Errorf("could not start the update: %w", err)
 		}
 		logf("applying update %s (service will restart)", v)
@@ -596,6 +603,10 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 func (e *Engine) saveAndRebuild() {
 	_ = e.cfg.Save()
 	e.buildSnapshotLocked()
+	// A change that applied immediately is a tightening (blocking is instant;
+	// loosening is delayed). Flush the OS DNS cache so a freshly-blocked site
+	// stops resolving right away instead of serving a cached address.
+	flushDNS()
 }
 
 // queue must be called with e.mu held.
