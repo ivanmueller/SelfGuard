@@ -279,7 +279,7 @@ async function load(){
   var raw;try{raw=await window.sgStatus()}catch(e){return gate(await running())}
   var s;try{s=JSON.parse(raw)}catch(e){return gate(await running())}
   last=s;lastOK=Date.now();
-  $("#gate").innerHTML="";$("#main").style.display="flex";
+  var g=$("#gate"); g.className=""; g.innerHTML=""; $("#main").style.display="flex";
   render(s);
 }
 async function running(){try{return await window.sgServiceRunning()}catch(e){return false}}
