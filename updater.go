@@ -239,12 +239,13 @@ func (e *Engine) doCheckUpdate() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("couldn't reach the update server")
 	}
-	if !isNewer(m.Version, version) {
+	svcBehind := isNewer(m.Version, version) || !strings.EqualFold(fileSHA(installedExe()), m.SvcSHA)
+	guiBehind := !strings.EqualFold(fileSHA(guiInstalledPath()), m.GuiSHA)
+	if !svcBehind && !guiBehind {
 		return fmt.Sprintf("You're on the latest version (%s).", version), nil
 	}
-	if updateReadyVersion() == m.Version {
-		return fmt.Sprintf("Update %s is downloaded - click Install.", m.Version), nil
-	}
+	// Something is behind (service and/or GUI) — make sure the needed binaries get
+	// downloaded and staged, even if only the GUI is behind.
 	go e.checkForUpdate()
 	return fmt.Sprintf("Update %s found - downloading now.", m.Version), nil
 }

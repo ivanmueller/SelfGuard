@@ -552,25 +552,32 @@ async function installUpdate(){
   $("#updtitle").textContent="Updating SelfGuard\u2026";
   $("#updsub").textContent="Installing the new version\u2026";
   try{ await window.sgCommand("apply_update",""); }catch(e){}
-  // Wait for the SERVICE to reach the new version BEFORE relaunching the GUI, so
-  // the new window never opens on a mismatch and the banner can't reappear.
+  // 1) wait for the SERVICE to reach the new version
   var svcDone=false;
   for(var i=0;i<30;i++){
-    await new Promise(function(r){ setTimeout(r,1000); });
-    try{
-      var st=JSON.parse(await window.sgStatus());
-      last=st;
-      if(st.version===target || !st.update_ready){ svcDone=true; break; }
-    }catch(e){ /* service restarting */ }
+    await usleep(1000);
+    try{ var st=JSON.parse(await window.sgStatus()); last=st; if(st.version===target || !st.update_ready){ svcDone=true; break; } }catch(e){}
   }
-  $("#updsub").textContent="Finishing\u2026";
-  // Service is current now; apply the GUI update and relaunch (process exits here
-  // if the GUI was staged). If the GUI was already current, just hide and refresh.
-  try{ await window.sgFinishUpdate(); }catch(e){}
+  // 2) if the GUI is already current, we're done
+  if(window.__guiver===target){ ov.classList.remove("show"); load(); return; }
+  // 3) wait for the new GUI to finish downloading/staging BEFORE swapping — this is
+  //    the fix: the staged file often isn't on disk the instant the service updates.
+  $("#updsub").textContent="Preparing the app update\u2026";
+  var staged=false, nudged=false;
+  for(var k=0;k<45;k++){
+    try{ if(await window.sgGuiStaged()){ staged=true; break; } }catch(e){}
+    if(k===4 && !nudged){ nudged=true; try{ await window.sgCommand("check_update",""); }catch(e){} } // kick the download
+    await usleep(1000);
+  }
+  if(staged){
+    $("#updsub").textContent="Finishing\u2026";
+    try{ await window.sgFinishUpdate(); }catch(e){}   // swaps GUI + relaunches (process exits here)
+  }
   ov.classList.remove("show");
-  if(!svcDone){ toast("Update is taking longer than expected \u2014 it will finish shortly.","wait"); }
+  if(!staged){ toast("App update will finish next time you open SelfGuard.","wait"); }
   load();
 }
+function usleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 $("#update").onclick=async function(){
   // If a verified update is already downloaded, install it. Otherwise ask the
   // service to check GitHub now. No local file search.

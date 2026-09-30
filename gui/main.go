@@ -272,6 +272,14 @@ func main() {
 	must("sgServiceRunning", func() bool { return serviceRunning() })
 	must("sgInstall", func() error { return sgInstall() })
 	must("sgGuiVersion", func() string { return version })
+	must("sgGuiStaged", func() bool {
+		self, err := os.Executable()
+		if err != nil {
+			return false
+		}
+		_, e := os.Stat(filepath.Join(filepath.Dir(self), "SelfGuard.new.exe"))
+		return e == nil
+	})
 	must("sgFinishUpdate", func() bool {
 		guiLog("sgFinishUpdate: called (GUI %s)", version)
 		saveWindowForRestore(uintptr(w.Window())) // remember size/place for the reopen
