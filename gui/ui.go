@@ -546,23 +546,33 @@ $("#nudgeRestart").onclick=async function(){
 };
 $("#updInstall").onclick=function(){ installUpdate(); };
 async function installUpdate(){
+  // Idempotent: nothing genuinely staged -> do nothing (kills the "click install
+  // repeatedly / almost-done loop").
+  if(!last || !last.update_ready){ toast("You're on the latest version."); return; }
   var ov=$("#updover"); ov.classList.add("show");
-  $("#updtitle").textContent="Updating SelfGuard…";
-  $("#updsub").textContent="Installing the new version and restarting. This only takes a few seconds.";
+  $("#updtitle").textContent="Updating SelfGuard\u2026";
+  $("#updsub").textContent="Installing the new version and restarting.";
   try{ await window.sgCommand("apply_update",""); }catch(e){}
-  // give the service a moment to begin its own swap+restart
   await new Promise(function(r){ setTimeout(r,3000); });
-  $("#updsub").textContent="Applying the app update…";
-  try{
-    var relaunched = await window.sgFinishUpdate(); // if true, this process is exiting
-    if(!relaunched){
-      // couldn't self-apply (e.g. locked folder handoff pending) — ask for a reopen
-      $("#updtitle").textContent="Almost done";
-      $("#updsub").textContent="Update installed. Please close and reopen SelfGuard to finish.";
+  $("#updsub").textContent="Finishing\u2026";
+  try{ await window.sgFinishUpdate(); }catch(e){}   // if the GUI relaunches, this process exits here
+  // GUI was already current (or handed off) -> wait for the service to finish its
+  // own swap, then hide the overlay. No misleading "reopen to finish" message.
+  var tries=0;
+  var iv=setInterval(async function(){
+    tries++;
+    try{
+      var st=JSON.parse(await window.sgStatus());
+      last=st;
+      if(!st.update_ready){ clearInterval(iv); ov.classList.remove("show"); render(st); return; }
+    }catch(e){ /* service restarting */ }
+    if(tries>=25){ // ~25s: service update didn't complete
+      clearInterval(iv); ov.classList.remove("show");
+      $("#updtitle").textContent="Updating SelfGuard\u2026";
+      $("#updsub").textContent="Installing the new version and restarting.";
+      toast("Update didn't finish \u2014 it will retry automatically.","wait");
     }
-  }catch(e){
-    // process is likely exiting to relaunch; nothing to do
-  }
+  },1000);
 }
 $("#update").onclick=async function(){
   // If a verified update is already downloaded, install it. Otherwise ask the
