@@ -234,8 +234,17 @@ const hardenedSDDL = "D:(D;;DCLCSWRPWPDTLOCRRC;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;SY)
 func lockdownMarker() string { return filepath.Join(dataDir(), "lockdown.on") }
 
 func lockdownActive() bool {
-	_, err := os.Stat(lockdownMarker())
-	return err == nil
+	if _, err := os.Stat(lockdownMarker()); err != nil {
+		return false
+	}
+	// The marker is only trusted if the folder is ACTUALLY locked. If the lock
+	// isn't really in place (e.g. it was undone, or an old marker lingered), the
+	// stale marker is removed so status never reports a lock that isn't there.
+	if !folderLocked(installDir()) {
+		_ = os.Remove(lockdownMarker())
+		return false
+	}
+	return true
 }
 
 // applyLockdown runs as SYSTEM (the service account). It restricts the service
