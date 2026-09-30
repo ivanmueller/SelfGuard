@@ -420,12 +420,19 @@ $("#updInstall").onclick=async function(){
   setTimeout(load,1500);
 };
 $("#update").onclick=async function(){
-  toast("Choose the new SelfGuard file to install…");
+  // If a verified update is already downloaded, install it. Otherwise ask the
+  // service to check GitHub now. No local file search.
+  if(last && last.update_ready){
+    toast("Installing the downloaded update…");
+    try{ var m=await window.sgApplyUpdate(); if(m!=="") toast(m, /^ERROR/i.test(m)?"err":""); }
+    catch(e){ toast("Install failed — try again.","err"); }
+    setTimeout(load,1500); return;
+  }
+  toast("Checking for updates…");
   try{
-    var msg=await window.sgUpdate();
-    if(msg===""){return}                    // cancelled
-    toast(msg, /^ERROR/i.test(msg)?"err":"");
-  }catch(e){ toast("Update failed — "+(e&&e.message?e.message:"try again"),"err"); }
+    var o=JSON.parse(await window.sgCommand("check_update",""));
+    toast(o.message||"Checked.", o.ok?"":"err");
+  }catch(e){ toast("Couldn't check for updates.","err"); }
   setTimeout(load,1500);
 };
 

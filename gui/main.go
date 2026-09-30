@@ -115,86 +115,6 @@ func serviceExePath() string {
 	return sd + `\SelfGuard\selfguard-svc.exe`
 }
 
-// pickExe shows a native file-open dialog (STA PowerShell) and returns the
-// chosen .exe path, or "" if the user cancels.
-func pickExe() (string, error) {
-	ps := "Add-Type -AssemblyName System.Windows.Forms;" +
-		"$f=New-Object System.Windows.Forms.OpenFileDialog;" +
-		"$f.Filter='SelfGuard program (*.exe)|*.exe';" +
-		"$f.Title='Choose the new SelfGuard file to install';" +
-		"if($f.ShowDialog() -eq 'OK'){[Console]::Out.Write($f.FileName)}"
-	out, err := exec.Command("powershell", "-NoProfile", "-STA", "-Command", ps).Output()
-	return strings.TrimSpace(string(out)), err
-}
-
-// svcUpdateScript / guiUpdateScript are PowerShell templates run elevated.
-// %[1]s = result file, %[2]s = chosen source, %[3]s = destination.
-const svcUpdateScript = `$ErrorActionPreference='Stop'
-$res='%[1]s'
-try{
-  sc.exe stop SelfGuard | Out-Null
-  $i=0; while((Get-Service SelfGuard).Status -ne 'Stopped' -and $i -lt 20){ Start-Sleep -Milliseconds 500; $i++ }
-  if((Get-Service SelfGuard).Status -ne 'Stopped'){ 'ERROR: could not stop the service - it may be hardened against admin stop. Restore the SDDL first, then update.' | Out-File -Encoding utf8 $res; exit }
-  Copy-Item '%[2]s' '%[3]s' -Force
-  sc.exe start SelfGuard | Out-Null
-  $h=(Get-FileHash '%[3]s' -Algorithm SHA256).Hash.Substring(0,8)
-  ('OK: service updated ('+$h+') and restarted.') | Out-File -Encoding utf8 $res
-}catch{ ('ERROR: '+$_) | Out-File -Encoding utf8 $res }
-`
-
-const guiUpdateScript = `$ErrorActionPreference='Stop'
-$res='%[1]s'
-try{
-  $d='%[3]s'
-  if(Test-Path ($d+'.old')){ Remove-Item ($d+'.old') -Force -ErrorAction SilentlyContinue }
-  if(Test-Path $d){ Move-Item $d ($d+'.old') -Force }
-  Copy-Item '%[2]s' $d -Force
-  'OK: app updated. Close this window and reopen SelfGuard to see it.' | Out-File -Encoding utf8 $res
-}catch{ ('ERROR: '+$_) | Out-File -Encoding utf8 $res }
-`
-
-// sgUpdate lets the user pick a freshly downloaded selfguard-svc.exe or
-// SelfGuard.exe and installs it in one elevated step — no PowerShell for the
-// user. Service: stop, copy over C:\SelfGuard\selfguard-svc.exe, restart. GUI:
-// rename the running exe and drop the new one in; the user just reopens.
-func sgUpdate() (string, error) {
-	src, err := pickExe()
-	if err != nil {
-		return "", fmt.Errorf("couldn't open the file picker")
-	}
-	if src == "" {
-		return "", nil // cancelled
-	}
-	tmp, err := os.MkdirTemp("", "sgupd")
-	if err != nil {
-		return "", err
-	}
-	res := filepath.Join(tmp, "result.txt")
-	ps1 := filepath.Join(tmp, "update.ps1")
-
-	var body string
-	if strings.Contains(strings.ToLower(filepath.Base(src)), "svc") {
-		body = fmt.Sprintf(svcUpdateScript, res, src, serviceExePath())
-	} else {
-		self, _ := os.Executable()
-		body = fmt.Sprintf(guiUpdateScript, res, src, self)
-	}
-	if err := os.WriteFile(ps1, []byte(body), 0o644); err != nil {
-		return "", err
-	}
-	run := exec.Command("powershell", "-NoProfile", "-Command",
-		"Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','"+ps1+"' -Verb RunAs -Wait")
-	if err := run.Run(); err != nil {
-		return "", fmt.Errorf("update cancelled (the admin prompt was declined)")
-	}
-	b, _ := os.ReadFile(res)
-	msg := strings.TrimSpace(strings.TrimPrefix(string(b), "\ufeff"))
-	if msg == "" {
-		msg = "Update finished."
-	}
-	return msg, nil
-}
-
 // applyStagedScript installs the binaries the service already downloaded and
 // verified. %[1]s=result, %[2]s=staged svc, %[3]s=installed svc,
 // %[4]s=staged gui, %[5]s=installed gui.
@@ -277,7 +197,6 @@ func main() {
 	must("sgCommand", sgCommand)
 	must("sgServiceRunning", func() bool { return serviceRunning() })
 	must("sgInstall", func() error { return sgInstall() })
-	must("sgUpdate", sgUpdate)
 	must("sgApplyUpdate", sgApplyUpdate)
 
 	if self, e := os.Executable(); e == nil {

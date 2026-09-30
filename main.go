@@ -419,6 +419,10 @@ func (e *Engine) performUninstall() {
 // ---- command handling (the delay-lock rules live here) ----
 
 func (e *Engine) handleCommand(kind, payload string) (string, error) {
+	if kind == "check_update" {
+		return e.doCheckUpdate() // does its own network I/O; must not hold e.mu
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -740,7 +744,7 @@ type program struct{ e *Engine }
 
 func (p *program) Start(s service.Service) error {
 	p.e = &Engine{}
-	logf("service starting (pid check)…")
+	logf("service starting")
 	if err := p.e.run(); err != nil { // must not block
 		logf("START FAILED: %v", err)
 		return err

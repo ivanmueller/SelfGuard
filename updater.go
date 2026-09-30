@@ -88,7 +88,7 @@ func parseVer(v string) ([]int, bool) {
 }
 
 func fetchManifest() (*updateManifest, error) {
-	c := &http.Client{Timeout: 20 * time.Second}
+	c := &http.Client{Timeout: 10 * time.Second}
 	resp, err := c.Get(manifestURL)
 	if err != nil {
 		return nil, err
@@ -184,7 +184,7 @@ func (e *Engine) checkForUpdate() {
 	if !isNewer(m.Version, version) {
 		return
 	}
-	logf("update available: %s (running %s) — downloading", m.Version, version)
+	logf("update available: %s (running %s) - downloading", m.Version, version)
 	if err := stageVerified(svcURL, stagedSvc(), m.SvcSHA); err != nil {
 		logf("stage service: %v", err)
 		return
@@ -195,6 +195,25 @@ func (e *Engine) checkForUpdate() {
 	}
 	_ = os.WriteFile(updateReadyFile(), []byte(m.Version), 0o644)
 	logf("update %s downloaded and verified; awaiting install", m.Version)
+}
+
+// doCheckUpdate is the on-demand check behind the app's Update button. It reaches
+// the update server, and: reports "up to date" if not newer; reports "ready" if
+// the newer build is already downloaded; otherwise kicks off the download in the
+// background (the banner appears when it's staged). No file picker, ever.
+func (e *Engine) doCheckUpdate() (string, error) {
+	m, err := fetchManifest()
+	if err != nil {
+		return "", fmt.Errorf("couldn't reach the update server")
+	}
+	if !isNewer(m.Version, version) {
+		return fmt.Sprintf("You're on the latest version (%s).", version), nil
+	}
+	if updateReadyVersion() == m.Version {
+		return fmt.Sprintf("Update %s is downloaded - click Install.", m.Version), nil
+	}
+	go e.checkForUpdate()
+	return fmt.Sprintf("Update %s found - downloading now.", m.Version), nil
 }
 
 // updateReadyVersion returns the staged, verified version awaiting install, or "".
