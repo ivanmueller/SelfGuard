@@ -512,8 +512,23 @@ function pushLevel(){
 $("#swBlock").onclick=function(){setSw(this,!this.classList.contains("on"));pushLevel()};
 $("#swImg").onclick=function(){if(this.classList.contains("disabled"))return;setSw(this,!this.classList.contains("on"));pushLevel()};
 $("#swVid").onclick=function(){if(this.classList.contains("disabled"))return;setSw(this,!this.classList.contains("on"));pushLevel()};
-$("#swFollow").onclick=function(){var on=!this.classList.contains("on");setSw(this,on);$("#pfSchedWrap").classList.toggle("show",!on);
-  if(on)api("set_site_schedule",JSON.stringify({domain:cur,schedule:{mode:"inherit"}}))};
+$("#swFollow").onclick=function(){
+  var on=!this.classList.contains("on");
+  setSw(this,on);
+  $("#pfSchedWrap").classList.toggle("show",!on);
+  if(on){
+    // follow the section schedule again
+    api("set_site_schedule",JSON.stringify({domain:cur,schedule:{mode:"inherit"}}));
+  } else {
+    // stop following -> the site keeps its OWN schedule (from the editor, default
+    // "always"). Must send a command here too, or the change never persists and
+    // the next status poll snaps the toggle back on.
+    var sc = ($("#pfMode").value==="windows")
+      ? buildSchedule("windows", pfDays, $("#pfFrom").value, $("#pfTo").value, $("#pfAllDay").checked)
+      : {mode:"always"};
+    api("set_site_schedule",JSON.stringify({domain:cur,schedule:sc}));
+  }
+};
 $("#pfMode").onchange=function(){$("#pfDaysWrap").style.display=this.value==="windows"?"block":"none"};
 $("#pfAllDay").onchange=function(){$("#pfTimes").style.opacity=this.checked?".4":"1"};
 $("#pfSchedSave").onclick=function(){var sc=buildSchedule($("#pfMode").value,pfDays,$("#pfFrom").value,$("#pfTo").value,$("#pfAllDay").checked);
