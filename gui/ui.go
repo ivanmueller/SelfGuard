@@ -146,30 +146,42 @@ const uiHTML = `<!DOCTYPE html>
   .lockbtn:hover{background:var(--guard-tint)}
   .lockbadge{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;color:#fff;background:var(--vault);border-radius:999px;padding:6px 12px;letter-spacing:.04em}
 
-  /* deep-lockdown sequence overlay */
-  #lockover{position:fixed;inset:0;background:#06120e;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:100;color:#e7fff4;overflow:hidden;font-family:ui-monospace,"Cascadia Mono","Consolas",monospace}
-  #lockover.show{display:flex}
-  #lockstream{position:absolute;inset:0;pointer-events:none;opacity:.10;color:#3fe0a2;font-size:12px;line-height:1.15;white-space:pre;overflow:hidden}
-  .lock-scan{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);top:0;animation:scan 2.4s linear infinite;opacity:.7}
-  @keyframes scan{0%{top:0}100%{top:100%}}
-  .lock-console{position:relative;z-index:2;width:min(560px,88vw);border:1px solid rgba(63,224,162,.35);border-radius:12px;background:rgba(6,20,15,.85);box-shadow:0 0 40px rgba(63,224,162,.12)}
-  .lc-head{font-size:11px;font-weight:800;letter-spacing:.18em;color:var(--gold);padding:11px 16px;border-bottom:1px solid rgba(63,224,162,.25)}
-  #lclog{margin:0;padding:14px 16px;min-height:150px;font-size:12.5px;line-height:1.7;color:#8ff0c7;white-space:pre-wrap}
-  #lclog .ok{color:var(--gold)}
-  .lc-bar{height:6px;margin:0 16px 12px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
-  .lc-fill{height:100%;width:0;background:linear-gradient(90deg,#3fe0a2,var(--gold));transition:width .06s linear}
-  .lc-hint{text-align:center;font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--gold);padding:0 0 14px}
-  #lcseal{position:absolute;inset:0;z-index:3;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:radial-gradient(600px 380px at 50% 45%,#123a2c,#06120e 85%)}
-  #lockover.sealed #lcseal{display:flex;animation:ovfade .3s ease}
-  #lockover.sealed .lock-console,#lockover.sealed .lock-scan{display:none}
+  /* updating overlay (centered) */
+  #updover{position:fixed;inset:0;background:rgba(244,245,241,.97);display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:120}
+  #updover.show{display:flex;animation:ovfade .25s ease}
+  .upd-card{display:flex;flex-direction:column;align-items:center;gap:16px;padding:34px 40px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:0 20px 50px -20px rgba(8,20,16,.4)}
+  .upd-spin{width:44px;height:44px;border-radius:50%;border:4px solid var(--guard-tint);border-top-color:var(--guard);animation:spin 0.9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .upd-title{font-weight:800;font-size:17px;color:var(--ink)}
+  .upd-sub{font-size:12.5px;color:var(--ink-soft);max-width:34ch;text-align:center;line-height:1.5}
+
+  /* device-lockdown overlay (restriction sequence, no code background) */
+  #lockover{position:fixed;inset:0;background:radial-gradient(700px 460px at 50% 42%,#16463a,#0a251d 85%);display:none;flex-direction:column;align-items:center;justify-content:center;gap:20px;z-index:100;color:#eafff6}
+  #lockover.show{display:flex;animation:ovfade .25s ease}
   @keyframes ovfade{from{opacity:0}to{opacity:1}}
+  .ld-badge{position:relative;width:150px;height:150px;display:grid;place-items:center}
+  .ld-badge svg.ring{transform:rotate(-90deg)}
+  .ld-badge .track{fill:none;stroke:rgba(255,255,255,.12);stroke-width:7}
+  .ld-badge .prog{fill:none;stroke:var(--gold);stroke-width:7;stroke-linecap:round;stroke-dasharray:427;stroke-dashoffset:427;transition:stroke-dashoffset .06s linear}
+  .ld-glyph{position:absolute;color:#fff}
+  .ld-title{font-family:var(--font);font-size:20px;font-weight:800;letter-spacing:.01em}
+  .ld-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;min-width:260px}
+  .ld-steps li{font-family:var(--font);font-size:13px;color:rgba(255,255,255,.45);display:flex;align-items:center;gap:10px;transition:color .2s}
+  .ld-steps li::before{content:"";width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35);flex:none;transition:all .2s}
+  .ld-steps li.on{color:#eafff6}
+  .ld-steps li.on::before{background:var(--gold);border-color:var(--gold)}
+  .ld-hint{font-family:var(--font);font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--gold)}
+  /* seal */
+  #lcseal{position:absolute;inset:0;z-index:3;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:radial-gradient(600px 380px at 50% 45%,#123a2c,#0a251d 85%)}
+  #lockover.sealed #lcseal{display:flex;animation:ovfade .3s ease}
+  #lockover.sealed .ld-badge,#lockover.sealed .ld-title,#lockover.sealed .ld-steps,#lockover.sealed .ld-hint{display:none}
   .seal-badge{position:relative;width:150px;height:150px;display:grid;place-items:center}
   .seal-badge .ring{position:absolute;inset:0;border-radius:50%;border:2px solid var(--gold)}
   .seal-badge .ring.b{animation:sealburst .7s ease-out}
   @keyframes sealburst{0%{transform:scale(.7);opacity:.9}100%{transform:scale(1.7);opacity:0}}
   .seal-title{font-family:var(--font);font-size:24px;font-weight:800;letter-spacing:.02em;color:#fff}
   .seal-sub{font-family:var(--font);font-size:13px;color:rgba(255,255,255,.7);max-width:36ch;text-align:center;line-height:1.5}
-  .seal-tag{font-size:11px;font-weight:800;letter-spacing:.22em;color:var(--gold)}
+  .seal-tag{font-family:var(--font);font-size:11px;font-weight:800;letter-spacing:.22em;color:var(--gold)}
   @media (max-width:820px){.body{grid-template-columns:1fr}.panel.adult{border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 </head>
@@ -288,27 +300,43 @@ const uiHTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- deep-lockdown sequence overlay -->
-  <div id="lockover">
-    <div id="lockstream"></div>
-    <div class="lock-scan"></div>
-    <div class="lock-console">
-      <div class="lc-head">SELFGUARD // SYSTEM LOCKDOWN</div>
-      <pre id="lclog"></pre>
-      <div class="lc-bar"><div class="lc-fill" id="lcfill"></div></div>
-      <div class="lc-hint" id="lchint">PRESS AND HOLD TO ENGAGE</div>
+  <!-- updating overlay -->
+  <div id="updover">
+    <div class="upd-card">
+      <div class="upd-spin"></div>
+      <div class="upd-title" id="updtitle">Updating SelfGuard…</div>
+      <div class="upd-sub" id="updsub">Installing the new version and restarting. This only takes a few seconds.</div>
     </div>
+  </div>
+
+  <!-- device-lockdown sequence overlay -->
+  <div id="lockover">
+    <div class="ld-badge">
+      <svg class="ring" width="150" height="150" viewBox="0 0 150 150">
+        <circle class="track" cx="75" cy="75" r="68"></circle>
+        <circle class="prog" id="ldprog" cx="75" cy="75" r="68"></circle>
+      </svg>
+      <svg class="ld-glyph" width="56" height="62" viewBox="0 0 18 20" fill="none"><path d="M9 1 16.5 4v6c0 5-3.2 7.7-7.5 9C4.7 17.7 1.5 15 1.5 10V4L9 1Z" fill="rgba(255,255,255,.08)" stroke="#fff" stroke-width="1"/><rect x="6" y="9" width="6" height="4.6" rx="1" fill="#fff"/><path d="M7.2 9V7.4a1.8 1.8 0 0 1 3.6 0V9" stroke="#fff" stroke-width="1.1" fill="none"/></svg>
+    </div>
+    <div class="ld-title" id="ldtitle">Hold to lock down this device</div>
+    <ul class="ld-steps" id="ldsteps">
+      <li data-i="0">Securing service control</li>
+      <li data-i="1">Restricting folder access</li>
+      <li data-i="2">Enforcing DNS &amp; policy</li>
+      <li data-i="3">Sealing the device</li>
+    </ul>
+    <div class="ld-hint" id="ldhint">PRESS AND HOLD</div>
     <div id="lcseal">
       <div class="seal-badge">
         <span class="ring"></span><span class="ring b"></span>
         <svg width="60" height="66" viewBox="0 0 18 20" fill="none"><path d="M9 1 16.5 4v6c0 5-3.2 7.7-7.5 9C4.7 17.7 1.5 15 1.5 10V4L9 1Z" fill="rgba(201,162,75,.10)" stroke="#C9A24B" stroke-width="1"/><rect x="6" y="9" width="6" height="4.6" rx="1" fill="#C9A24B"/><path d="M7.2 9V7.4a1.8 1.8 0 0 1 3.6 0V9" stroke="#C9A24B" stroke-width="1.1" fill="none"/></svg>
       </div>
       <div class="seal-tag">RESTRICTION ENFORCED</div>
-      <div class="seal-title">DEVICE FULLY LOCKED DOWN</div>
-      <div class="seal-sub" id="sealsub">This device is sealed. Removal now requires your recovery key.</div>
+      <div class="seal-title">DEVICE LOCKED DOWN</div>
+      <div class="seal-sub">This device is sealed. Removal now requires your recovery key.</div>
     </div>
   </div>
-</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -504,10 +532,23 @@ $("#nudgeRestart").onclick=async function(){
 };
 $("#updInstall").onclick=function(){ installUpdate(); };
 async function installUpdate(){
-  toast("Installing the downloaded update…");
-  try{ var o=JSON.parse(await window.sgCommand("apply_update","")); toast(o.message||"Installing…", o.ok?"":"err"); }
-  catch(e){ toast("Install failed — try again.","err"); }
-  setTimeout(load,3000);
+  var ov=$("#updover"); ov.classList.add("show");
+  $("#updtitle").textContent="Updating SelfGuard…";
+  $("#updsub").textContent="Installing the new version and restarting. This only takes a few seconds.";
+  try{ await window.sgCommand("apply_update",""); }catch(e){}
+  // give the service a moment to begin its own swap+restart
+  await new Promise(function(r){ setTimeout(r,3000); });
+  $("#updsub").textContent="Applying the app update…";
+  try{
+    var relaunched = await window.sgFinishUpdate(); // if true, this process is exiting
+    if(!relaunched){
+      // couldn't self-apply (e.g. locked folder handoff pending) — ask for a reopen
+      $("#updtitle").textContent="Almost done";
+      $("#updsub").textContent="Update installed. Please close and reopen SelfGuard to finish.";
+    }
+  }catch(e){
+    // process is likely exiting to relaunch; nothing to do
+  }
 }
 $("#update").onclick=async function(){
   // If a verified update is already downloaded, install it. Otherwise ask the
@@ -524,33 +565,28 @@ $("#update").onclick=async function(){
 // live "checked ago"
 setInterval(function(){var el=$("#ago");if(!lastOK){return}var s=Math.floor((Date.now()-lastOK)/1000);el.textContent=s<5?"just now":(s<60?s+"s ago":Math.floor(s/60)+"m ago")},1000);
 
-// ---- deep-lockdown press-and-hold sequence ----
-var HOLD_MS=3200;
-var LOCK_STEPS=["acquiring SYSTEM privileges","sealing service control  [SDDL]","revoking write access  ::  C:\\SelfGuard","enforcing DNS + policy layer","writing restriction manifest"];
-function hex(n){var s="";for(var i=0;i<n;i++)s+="0123456789abcdef"[Math.floor(Math.random()*16)];return s}
-function startStream(){var el=$("#lockstream");if(el._on)return;el._on=true;var cols=Math.floor((el.clientWidth||900)/9);
-  el._iv=setInterval(function(){var l="";for(var i=0;i<cols;i++)l+=(Math.random()<.5?"0":"1");el.textContent=(el.textContent+"\n"+l).split("\n").slice(-60).join("\n");},70);}
-function stopStream(){var el=$("#lockstream");if(el._iv){clearInterval(el._iv);el._on=false;el._iv=null;}el.textContent="";}
+// ---- device-lockdown press-and-hold sequence (no code stream) ----
+var HOLD_MS=3000, LD_CIRC=427;
 function armHold(btn){
-  var over=$("#lockover"), log=$("#lclog"), fill=$("#lcfill");
-  var t0=0, raf=0, done=false, shown=0;
-  function reset(){ over.className=""; log.innerHTML=""; fill.style.width="0"; shown=0; done=false;
-    $("#lchint").textContent="PRESS AND HOLD TO ENGAGE"; cancelAnimationFrame(raf); stopStream(); }
-  function line(txt,ok){ var sp=document.createElement("span"); sp.className=ok?"ok":"";
-    sp.textContent="> "+txt+"  "+hex(6)+(ok?"  [ ok ]":"")+"\n"; log.appendChild(sp); log.scrollTop=log.scrollHeight; }
-  function tick(now){ var p=Math.min(1,(now-t0)/HOLD_MS); fill.style.width=(p*100).toFixed(1)+"%";
-    var want=Math.floor(p*LOCK_STEPS.length); while(shown<want && shown<LOCK_STEPS.length){ line(LOCK_STEPS[shown],true); shown++; }
+  var over=$("#lockover"), prog=$("#ldprog"), steps=$("#ldsteps").querySelectorAll("li");
+  var t0=0, raf=0, done=false;
+  function reset(){ over.className=""; prog.style.transition="stroke-dashoffset .2s ease"; prog.style.strokeDashoffset=LD_CIRC;
+    steps.forEach(function(li){li.classList.remove("on");}); $("#ldtitle").textContent="Hold to lock down this device";
+    $("#ldhint").textContent="PRESS AND HOLD"; cancelAnimationFrame(raf); done=false; }
+  function tick(now){ var p=Math.min(1,(now-t0)/HOLD_MS);
+    prog.style.transition="none"; prog.style.strokeDashoffset=String(LD_CIRC*(1-p));
+    var lit=Math.floor(p*steps.length); steps.forEach(function(li,i){ li.classList.toggle("on", i<lit); });
+    $("#ldtitle").textContent="Locking down this device…";
     if(p<1){ raf=requestAnimationFrame(tick); } else if(!done){ done=true; seal(); } }
-  function start(e){ e.preventDefault(); over.className="show"; startStream(); $("#lchint").textContent="KEEP HOLDING…";
-    log.innerHTML=""; shown=0; line("initializing lockdown sequence"); t0=performance.now(); raf=requestAnimationFrame(tick);
+  function start(e){ e.preventDefault(); over.className="show"; $("#ldhint").textContent="KEEP HOLDING…";
+    t0=performance.now(); raf=requestAnimationFrame(tick);
     window.addEventListener("pointerup",end,{once:true}); window.addEventListener("pointercancel",end,{once:true}); }
-  function end(){ if(done) return; cancelAnimationFrame(raf); line("SEQUENCE ABORTED — no changes made");
-    $("#lchint").textContent="RELEASED"; setTimeout(function(){ if(!done) reset(); }, 700); }
-  async function seal(){ $("#lchint").textContent="COMMITTING…"; var ok=false;
-    try{ var o=JSON.parse(await window.sgCommand("lock_down","")); ok=!!o.ok; }catch(e){ ok=false; }
-    if(ok){ line("restriction manifest committed",true); over.className="show sealed";
-      setTimeout(function(){ over.className=""; reset(); load(); }, 2400); }
-    else { line("LOCKDOWN FAILED — nothing was changed"); $("#lchint").textContent="FAILED — TRY AGAIN";
+  function end(){ if(done) return; cancelAnimationFrame(raf); $("#ldhint").textContent="RELEASED — no changes made";
+    setTimeout(function(){ if(!done) reset(); }, 600); }
+  async function seal(){ steps.forEach(function(li){li.classList.add("on");}); $("#ldtitle").textContent="Sealing…"; $("#ldhint").textContent="";
+    var ok=false; try{ var o=JSON.parse(await window.sgCommand("lock_down","")); ok=!!o.ok; }catch(e){ ok=false; }
+    if(ok){ over.className="show sealed"; setTimeout(function(){ over.className=""; reset(); load(); }, 2400); }
+    else { $("#ldtitle").textContent="Couldn't lock down"; $("#ldhint").textContent="NOTHING WAS CHANGED — TRY AGAIN";
       setTimeout(function(){ over.className=""; reset(); load(); }, 2000); } }
   btn.addEventListener("pointerdown", start);
 }

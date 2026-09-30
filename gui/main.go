@@ -111,35 +111,49 @@ func sgInstall() error {
 // a direct rename first (works when the folder is writable); if that's refused
 // (device locked down), it asks the SYSTEM service to do the swap, then relaunches.
 // Either way the staged file is consumed, so this never loops.
-func applyStagedGuiOnLaunch() {
+// swapStagedGui installs a staged newer GUI (SelfGuard.new.exe) in place and
+// returns true if it did. Direct rename when the folder is writable; otherwise
+// it asks the SYSTEM service to do the swap (locked-down case).
+func swapStagedGui() bool {
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	staged := filepath.Join(filepath.Dir(self), "SelfGuard.new.exe")
+	if _, err := os.Stat(staged); err != nil {
+		return false // nothing staged
+	}
+	if os.Rename(self, self+".old") == nil { // folder writable
+		if os.Rename(staged, self) == nil {
+			return true
+		}
+		_ = os.Rename(self+".old", self) // restore on failure
+	}
+	// Locked folder: let the SYSTEM service perform the swap.
+	_, _ = sgCommand("apply_gui", "")
+	time.Sleep(2 * time.Second)
+	_, err = os.Stat(staged)
+	return err != nil // applied if the staged file is now gone
+}
+
+// relaunchSelf starts a fresh copy of this exe and exits the current process.
+func relaunchSelf() {
 	self, err := os.Executable()
 	if err != nil {
 		return
 	}
-	_ = os.Remove(self + ".old") // clean up a prior swap
-	staged := filepath.Join(filepath.Dir(self), "SelfGuard.new.exe")
-	if _, err := os.Stat(staged); err != nil {
-		return // nothing staged
+	_ = exec.Command(self).Start()
+	os.Exit(0)
+}
+
+// applyStagedGuiOnLaunch runs at startup: if a newer GUI is staged, install it
+// and relaunch so the app is always current when opened.
+func applyStagedGuiOnLaunch() {
+	if self, err := os.Executable(); err == nil {
+		_ = os.Remove(self + ".old")
 	}
-	applied := false
-	if os.Rename(self, self+".old") == nil { // direct (folder writable)
-		if os.Rename(staged, self) == nil {
-			applied = true
-		} else {
-			_ = os.Rename(self+".old", self) // restore on failure
-		}
-	}
-	if !applied { // locked folder -> let the SYSTEM service do it
-		_, _ = sgCommand("apply_gui", "")
-		time.Sleep(2 * time.Second)
-		if _, err := os.Stat(staged); err == nil {
-			return // service didn't apply it; keep running the current build
-		}
-		applied = true
-	}
-	if applied {
-		_ = exec.Command(self).Start()
-		os.Exit(0)
+	if swapStagedGui() {
+		relaunchSelf()
 	}
 }
 
@@ -173,6 +187,13 @@ func main() {
 	must("sgServiceRunning", func() bool { return serviceRunning() })
 	must("sgInstall", func() error { return sgInstall() })
 	must("sgGuiVersion", func() string { return version })
+	must("sgFinishUpdate", func() bool {
+		if swapStagedGui() {
+			relaunchSelf() // process exits here; the new build takes over
+			return true
+		}
+		return false
+	})
 	must("sgRestartBrowser", func() error {
 		// User-initiated only. Launches Chrome to chrome://restart, which makes a
 		// running Chrome restart itself and drop cached pages. We never force-kill
