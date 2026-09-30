@@ -1,5 +1,10 @@
 # SelfGuard
 
+> **Contributing or making changes (incl. with an AI assistant)?** Read
+> [`AI-CONTEXT.md`](AI-CONTEXT.md) first (architecture, file map, safety
+> invariants), then [`CONTRIBUTING.md`](CONTRIBUTING.md) (build, test, release).
+
+
 A local DNS content filter for Windows. A service (running as `NT AUTHORITY\SYSTEM`)
 points the machine's DNS at `127.0.0.1`, answers `NXDOMAIN` for blocked domains,
 forces SafeSearch, and blocks encrypted-DNS (DoH) endpoints. A WebView2 GUI lets
