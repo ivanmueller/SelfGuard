@@ -346,9 +346,9 @@ try{
     Remove-Item '%[2]s' -Force -ErrorAction SilentlyContinue
   }
   if(Test-Path '%[4]s'){
-    Copy-Item '%[5]s' '%[5]s.old' -Force -ErrorAction SilentlyContinue
-    Copy-Item '%[4]s' '%[5]s' -Force
-    Remove-Item '%[4]s' -Force -ErrorAction SilentlyContinue
+    Remove-Item '%[5]s.old' -Force -ErrorAction SilentlyContinue
+    if(Test-Path '%[5]s'){ Move-Item '%[5]s' '%[5]s.old' -Force }  # rename running GUI (allowed)
+    Move-Item '%[4]s' '%[5]s' -Force                               # drop new GUI into place
   }
 }catch{}
 Remove-Item '%[6]s' -Force -ErrorAction SilentlyContinue
