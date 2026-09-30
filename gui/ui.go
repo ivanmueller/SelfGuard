@@ -501,10 +501,18 @@ function armHold(btn){
   function end(){ if(done) return; cancelAnimationFrame(raf); // released early
     setTimeout(function(){ if(!done){ over.className=""; reset(); } },0); }
   async function seal(){
-    over.className="show sealed"; $("#locktitle").textContent="DEVICE SECURED"; $("#lockhint").textContent="";
-    $("#locksub").textContent="This device is now locked down. Removal requires your recovery key — that's the point.";
-    try{ await window.sgCommand("lock_down",""); }catch(e){}
-    setTimeout(function(){ over.className=""; reset(); load(); }, 1600);
+    $("#locktitle").textContent="Sealing…"; $("#lockhint").textContent="";
+    var ok=false;
+    try{ var o=JSON.parse(await window.sgCommand("lock_down","")); ok=!!o.ok; }catch(e){ ok=false; }
+    if(ok){
+      over.className="show sealed"; $("#locktitle").textContent="DEVICE SECURED";
+      $("#locksub").textContent="This device is now locked down. Removal requires your recovery key — that's the point.";
+      setTimeout(function(){ over.className=""; reset(); load(); }, 1600);
+    } else {
+      $("#locktitle").textContent="Couldn't lock down"; $("#lockhint").textContent="TRY AGAIN";
+      $("#locksub").textContent="The lockdown command didn't go through. Nothing was changed.";
+      setTimeout(function(){ over.className=""; reset(); load(); }, 1800);
+    }
   }
   btn.addEventListener("pointerdown", start);
 }

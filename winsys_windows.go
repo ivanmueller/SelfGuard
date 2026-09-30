@@ -245,19 +245,57 @@ func lockdownActive() bool {
 // anywhere and does NOT delete any recovery notes — removal stays possible with
 // the recovery command you keep offline.
 func applyLockdown() error {
-	_ = runCmd("sc", "sdset", appName, hardenedSDDL)
+	// 1) Service protection SDDL, then VERIFY it actually took.
+	if err := runCmd("sc", "sdset", appName, hardenedSDDL); err != nil {
+		return fmt.Errorf("service protection (sdset) failed: %w", err)
+	}
+	if out, _ := outputCmd("sc", "sdshow", appName); !strings.Contains(out, "(D;") {
+		return fmt.Errorf("service protection did not apply")
+	}
+	// 2) Auto-restart on unexpected termination (best-effort).
 	_ = runCmd("sc", "failure", appName, "reset=", "86400",
 		"actions=", "restart/2000/restart/5000/restart/10000")
+
+	// 3) Lock the install folder. Order matters: take ownership FIRST, hand it to
+	// SYSTEM, THEN strip inheritance and set the read-only grants — otherwise
+	// icacls is refused and silently leaves the folder open (the earlier bug).
 	dir := installDir()
-	_ = runCmd("icacls", dir, "/inheritance:r",
+	_ = runCmd("takeown", "/F", dir, "/A", "/R", "/D", "Y")
+	_ = runCmd("icacls", dir, "/setowner", "*S-1-5-18", "/T", "/C")
+	if err := runCmd("icacls", dir, "/inheritance:r",
+		"/remove", "*S-1-5-11", // drop Authenticated Users
 		"/grant:r", "*S-1-5-18:(OI)(CI)F", // SYSTEM: full
 		"/grant:r", "*S-1-5-32-544:(OI)(CI)RX", // Administrators: read & execute
 		"/grant:r", "*S-1-5-32-545:(OI)(CI)RX", // Users: read & execute
-		"/setowner", "*S-1-5-18", "/T", "/C", "/Q")
+		"/T", "/C"); err != nil {
+		return fmt.Errorf("folder lock (icacls) failed: %w", err)
+	}
+	// VERIFY the folder is actually locked before recording success.
+	if !folderLocked(dir) {
+		return fmt.Errorf("folder lock did not take effect")
+	}
+
+	// Only now is it truly locked — record it.
 	if err := os.WriteFile(lockdownMarker(), []byte("on"), 0o644); err != nil {
 		return err
 	}
 	return nil
+}
+
+// folderLocked confirms the install folder no longer inherits permissions and no
+// longer grants write to ordinary accounts — i.e. the lock genuinely applied.
+func folderLocked(dir string) bool {
+	out, err := outputCmd("icacls", dir)
+	if err != nil {
+		return false
+	}
+	if strings.Contains(out, "Authenticated Users") {
+		return false // still writable by everyone
+	}
+	if strings.Contains(out, "(I)") {
+		return false // inheritance not stripped
+	}
+	return true
 }
 
 // swapAndRestart installs a staged, hash-verified update from within the service
@@ -268,21 +306,33 @@ func applyLockdown() error {
 // Each staged file was already checked against the release manifest's SHA-256, so
 // only a genuine build is ever swapped in; the .old copies remain for recovery.
 func swapAndRestart(svcNew, svcDst, guiNew, guiDst, marker string) error {
+	// Copy (not move) the new files over the old, keeping .old backups, so a
+	// half-finished swap can never leave the service with no binary. Stale
+	// leftovers are cleared first (the "file already exists" failure). If the
+	// service doesn't come back up, the old binary is restored automatically.
 	ps := fmt.Sprintf(`Start-Sleep -Seconds 2
 sc.exe stop %[1]s | Out-Null
 $i=0; while((Get-Service %[1]s).Status -ne 'Stopped' -and $i -lt 30){ Start-Sleep -Seconds 1; $i++ }
-if(Test-Path '%[2]s'){
-  if(Test-Path ('%[3]s'+'.old')){ Remove-Item ('%[3]s'+'.old') -Force -ErrorAction SilentlyContinue }
-  if(Test-Path '%[3]s'){ Move-Item '%[3]s' ('%[3]s'+'.old') -Force }
-  Move-Item '%[2]s' '%[3]s' -Force
-}
-if(Test-Path '%[4]s'){
-  if(Test-Path ('%[5]s'+'.old')){ Remove-Item ('%[5]s'+'.old') -Force -ErrorAction SilentlyContinue }
-  if(Test-Path '%[5]s'){ Move-Item '%[5]s' ('%[5]s'+'.old') -Force }
-  Move-Item '%[4]s' '%[5]s' -Force
-}
+Remove-Item '%[3]s.old','%[5]s.old' -Force -ErrorAction SilentlyContinue
+try{
+  if(Test-Path '%[2]s'){
+    Copy-Item '%[3]s' '%[3]s.old' -Force -ErrorAction SilentlyContinue
+    Copy-Item '%[2]s' '%[3]s' -Force
+    Remove-Item '%[2]s' -Force -ErrorAction SilentlyContinue
+  }
+  if(Test-Path '%[4]s'){
+    Copy-Item '%[5]s' '%[5]s.old' -Force -ErrorAction SilentlyContinue
+    Copy-Item '%[4]s' '%[5]s' -Force
+    Remove-Item '%[4]s' -Force -ErrorAction SilentlyContinue
+  }
+}catch{}
 Remove-Item '%[6]s' -Force -ErrorAction SilentlyContinue
-sc.exe start %[1]s | Out-Null`, appName, svcNew, svcDst, guiNew, guiDst, marker)
+sc.exe start %[1]s | Out-Null
+Start-Sleep -Seconds 2
+if((Get-Service %[1]s).Status -ne 'Running'){
+  if(Test-Path '%[3]s.old'){ Copy-Item '%[3]s.old' '%[3]s' -Force }
+  sc.exe start %[1]s | Out-Null
+}`, appName, svcNew, svcDst, guiNew, guiDst, marker)
 
 	dir := dataDir()
 	_ = os.MkdirAll(dir, 0o755)
@@ -291,10 +341,22 @@ sc.exe start %[1]s | Out-Null`, appName, svcNew, svcDst, guiNew, guiDst, marker)
 		return err
 	}
 	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1)
-	// Detached so it survives the service stopping; hidden; own process group.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 	}
 	return cmd.Start()
+}
+
+// sweepUpdateLeftovers clears incomplete downloads and stale swap files on start,
+// so a previous failed update self-heals rather than colliding next time.
+func sweepUpdateLeftovers() {
+	dir := installDir()
+	for _, pat := range []string{"*.partial", "*.new.exe"} {
+		if matches, err := filepath.Glob(filepath.Join(dir, pat)); err == nil {
+			for _, m := range matches {
+				_ = os.Remove(m)
+			}
+		}
+	}
 }

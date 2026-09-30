@@ -167,7 +167,7 @@ func (e *Engine) updateLoop() {
 		select {
 		case <-e.stop:
 			return
-		case <-time.After(6 * time.Hour):
+		case <-time.After(30 * time.Minute):
 		}
 	}
 }

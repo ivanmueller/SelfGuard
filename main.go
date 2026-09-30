@@ -70,6 +70,7 @@ func (e *Engine) run() error {
 		return fmt.Errorf("control API: %w", err)
 	}
 
+	sweepUpdateLeftovers() // heal any half-finished previous update
 	go e.refreshLists()
 	go e.dnsLoop()
 	go e.reconcileLoop()
@@ -699,6 +700,7 @@ func (e *Engine) status() statusResp {
 	return statusResp{
 		Version:     version,
 		UpdateReady: updateReadyVersion(),
+		LockedDown:  lockdownActive(),
 		DelayHours:  e.cfg.DelayHours,
 		Now:         now.Format("2006-01-02 15:04:05 Mon"),
 		NetTimeOK:   netOK,
