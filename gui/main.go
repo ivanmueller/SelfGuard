@@ -272,6 +272,7 @@ func main() {
 	must("sgServiceRunning", func() bool { return serviceRunning() })
 	must("sgInstall", func() error { return sgInstall() })
 	must("sgGuiVersion", func() string { return version })
+	must("sgLogos", func() string { return logosJSON() })
 	must("sgGuiStaged", func() bool {
 		self, err := os.Executable()
 		if err != nil {

@@ -347,6 +347,13 @@ var FAV={ "reddit.com":["#FF4500","R"],"instagram.com":["#E1306C","I"],"x.com":[
   "facebook.com":["#1877F2","F"],"tiktok.com":["#111","T"],"youtube.com":["#FF0000","Y"],"pinterest.com":["#E60023","P"],
   "snapchat.com":["#111","S"],"tumblr.com":["#35465C","T"],"discord.com":["#5865F2","D"],"linkedin.com":["#0A66C2","L"] };
 var last=null, cur=null, lastOK=0;
+var LOGOS={};
+try{ if(window.sgLogos){ window.sgLogos().then(function(j){ try{LOGOS=JSON.parse(j)||{};}catch(e){} }); } }catch(e){}
+function logoKey(d){ return String(d).replace(/\.(com|tv|net|org|io|co)$/,"").toLowerCase(); }
+function logoFor(d){ return LOGOS[logoKey(d)]||""; }
+function tileInner(domain){ var f=favOf(domain); var lg=logoFor(domain);
+  if(lg){ return "<div class='logo' style='background:#fff;padding:0;overflow:hidden'><img src='"+lg+"' alt='' style='width:100%;height:100%;object-fit:contain;display:block'></div>"; }
+  return "<div class='logo' style='background:"+f[0]+"'>"+f[1]+"</div>"; }
 function $(x){return document.querySelector(x)}
 function esc(x){return String(x).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]})}
 function toast(m,k){var t=$("#toast");t.textContent=m;t.className="toast show"+(k?(" "+k):"");clearTimeout(t._t);t._t=setTimeout(function(){t.className="toast"+(k?(" "+k):"")},2600)}
@@ -463,7 +470,7 @@ function renderTiles(sites){
   sites.forEach(function(site){
     var st=statusOf(site.level||"blocked");var f=favOf(site.domain);
     var el=document.createElement("div");el.className="tile";
-    el.innerHTML="<div class='logo' style='background:"+f[0]+"'>"+f[1]+"</div><div class='nm'>"+esc(niceName(site.domain))+"</div><div class='st "+st[1]+"'>"+st[0]+"</div>";
+    el.innerHTML=tileInner(site.domain)+"<div class='nm'>"+esc(niceName(site.domain))+"</div><div class='st "+st[1]+"'>"+st[0]+"</div>";
     el.onclick=function(){cur=site.domain;renderProfile()};
     g.appendChild(el);
   });
@@ -477,7 +484,9 @@ function siteByDomain(d){return (last.sites||[]).find(function(x){return x.domai
 function renderProfile(){
   var site=siteByDomain(cur);if(!site){cur=null;renderTiles(last.sites||[]);return}
   $("#socialGrid").style.display="none";$("#pf").style.display="block";
-  var f=favOf(site.domain);$("#pfLogo").style.background=f[0];$("#pfLogo").textContent=f[1];
+  var f=favOf(site.domain), lg=logoFor(site.domain), pl=$("#pfLogo");
+  if(lg){ pl.style.background="#fff"; pl.style.padding="0"; pl.style.overflow="hidden"; pl.innerHTML="<img src='"+lg+"' alt='' style='width:100%;height:100%;object-fit:contain;display:block'>"; }
+  else { pl.style.background=f[0]; pl.style.padding=""; pl.innerHTML=""; pl.textContent=f[1]; }
   $("#pfName").textContent=niceName(site.domain);$("#pfDom").textContent=site.domain;
   var t=togglesFromLevel(site.level||"blocked");
   setSw($("#swBlock"),t.block);setSw($("#swImg"),t.img);setSw($("#swVid"),t.vid);
