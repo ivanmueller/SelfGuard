@@ -70,11 +70,9 @@ func (e *Engine) run() error {
 		return fmt.Errorf("control API: %w", err)
 	}
 
-	sweepUpdateLeftovers() // heal any half-finished previous update
 	go e.refreshLists()
 	go e.dnsLoop()
 	go e.reconcileLoop()
-	go e.updateLoop()
 	return nil
 }
 
@@ -201,21 +199,45 @@ func (e *Engine) refreshLists() {
 			addBlockable(set, d)
 		}
 		var merged []string
+		fetched := 0
 		for _, u := range cat.BlocklistURLs {
 			domains, err := fetchList(u)
 			if err != nil {
+				logf("list refresh %s: %s: %v", name, u, err)
 				continue
 			}
+			fetched++
 			merged = append(merged, domains...)
 		}
-		for _, d := range merged {
-			addBlockable(set, d)
-		}
-		if len(merged) > 0 {
+		switch {
+		case len(merged) > 0:
+			// Good download: use it and refresh the on-disk cache.
+			for _, d := range merged {
+				addBlockable(set, d)
+			}
 			_ = saveCache(name, merged)
+			logf("list refresh %s: loaded %d domains (%d/%d sources)", name, len(set), fetched, len(cat.BlocklistURLs))
+		default:
+			// Nothing downloaded. Fall back to the on-disk cache so a flaky or
+			// offline network can NEVER leave the list empty.
+			cached := loadCache(name)
+			for _, d := range cached {
+				addBlockable(set, d)
+			}
+			if len(cached) > 0 {
+				logf("list refresh %s: download failed, kept %d cached domains", name, len(set))
+			} else {
+				logf("list refresh %s: download failed and no cache — list is EMPTY", name)
+			}
 		}
 		e.mu.Lock()
-		e.lists[name] = set
+		// Never replace a non-empty list with an empty one (e.g. a transient
+		// failure where even the cache is missing): keep what we already had.
+		if len(set) == 0 && len(e.lists[name]) > 0 {
+			logf("list refresh %s: keeping existing %d domains (refresh produced none)", name, len(e.lists[name]))
+		} else {
+			e.lists[name] = set
+		}
 		e.mu.Unlock()
 	}
 	e.buildSnapshot()
@@ -420,10 +442,6 @@ func (e *Engine) performUninstall() {
 // ---- command handling (the delay-lock rules live here) ----
 
 func (e *Engine) handleCommand(kind, payload string) (string, error) {
-	if kind == "check_update" {
-		return e.doCheckUpdate() // does its own network I/O; must not hold e.mu
-	}
-
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -451,44 +469,6 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 		e.cfg.Allow = removeItem(e.cfg.Allow, d)
 		e.saveAndRebuild()
 		return fmt.Sprintf("Now blocking %s (effective now).", d), nil
-
-	case "lock_down":
-		if err := applyLockdown(); err != nil {
-			return "", fmt.Errorf("could not lock down: %w", err)
-		}
-		logf("device locked down")
-		return "Device locked down.", nil
-
-	case "apply_gui":
-		if err := swapGuiOnly(stagedGui(), guiInstalledPath()); err != nil {
-			return "", fmt.Errorf("gui swap failed: %w", err)
-		}
-		logf("gui updated via apply_gui")
-		return "GUI updated.", nil
-
-	case "apply_update":
-		v := updateReadyVersion()
-		if v == "" {
-			return "", fmt.Errorf("no verified update is staged")
-		}
-		if err := swapAndRestart(stagedSvc(), installedExe(), updateReadyFile()); err != nil {
-			return "", fmt.Errorf("could not start the update: %w", err)
-		}
-		logf("applying update %s (service will restart)", v)
-		return fmt.Sprintf("Installing %s — the service will restart in a moment.", v), nil
-
-	case "request_site":
-		d := normDomain(payload)
-		if d == "" {
-			return "", fmt.Errorf("empty request")
-		}
-		line := time.Now().Format("2006-01-02 15:04") + "  " + d + "\r\n"
-		f, err := os.OpenFile(filepath.Join(dataDir(), "requests.txt"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err == nil {
-			_, _ = f.WriteString(line)
-			f.Close()
-		}
-		return fmt.Sprintf("Requested %s — saved to requests.txt.", d), nil
 
 	case "cancel_pending":
 		before := len(e.cfg.Pending)
@@ -564,13 +544,13 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 		if cur == "" {
 			cur = LevelBlocked
 		}
-		if stricterOrEqual(lp.Level, cur) {
+		if strictness(lp.Level) >= strictness(cur) {
 			// stricter or same -> immediate
 			e.cfg.Social[i].Level = lp.Level
 			e.saveAndRebuild()
 			return fmt.Sprintf("%s set to %q (effective now).", lp.Domain, lp.Level), nil
 		}
-		return e.queue(kind, payload) // unblocks something -> delayed
+		return e.queue(kind, payload) // looser -> delayed
 
 	case "set_site_schedule":
 		// Any schedule change is treated as a loosening (it can reduce blocked
@@ -603,10 +583,6 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 func (e *Engine) saveAndRebuild() {
 	_ = e.cfg.Save()
 	e.buildSnapshotLocked()
-	// A change that applied immediately is a tightening (blocking is instant;
-	// loosening is delayed). Flush the OS DNS cache so a freshly-blocked site
-	// stops resolving right away instead of serving a cached address.
-	flushDNS()
 }
 
 // queue must be called with e.mu held.
@@ -648,12 +624,21 @@ func (e *Engine) status() statusResp {
 	now := time.Now()
 
 	var cats []catStatus
+	filteringAdult := true
 	for name, cat := range e.cfg.Categories {
+		n := len(e.lists[name])
+		// A category that pulls from blocklist URLs but has zero domains loaded
+		// is not actually filtering — the download failed and there's no cache.
+		empty := len(cat.BlocklistURLs) > 0 && n == 0
+		if name == "porn" && empty {
+			filteringAdult = false
+		}
 		cats = append(cats, catStatus{
 			Name:       name,
 			Enabled:    cat.Enabled,
 			BlockedNow: cat.blockedAt(now),
-			Domains:    len(e.lists[name]),
+			Domains:    n,
+			ListEmpty:  empty,
 			Mode:       cat.Schedule.Mode,
 		})
 	}
@@ -671,19 +656,12 @@ func (e *Engine) status() statusResp {
 		}
 		blockedNow := active && level == LevelBlocked
 		media := append(append([]string(nil), site.ImageHosts...), site.VideoHosts...)
-		// Which partial controls the UI should offer. A site needs the relevant
-		// hosts, and TikTok is excluded from partial control entirely because it
-		// rotates CDNs too aggressively for image/video-only blocking to hold.
-		canImg := len(site.ImageHosts) > 0 && site.Domain != "tiktok.com"
-		canVid := len(site.VideoHosts) > 0 && site.Domain != "tiktok.com"
 		sites = append(sites, siteStatus{
 			Domain:     site.Domain,
 			Level:      level,
 			MediaCount: len(media),
 			ImageCount: len(site.ImageHosts),
 			VideoCount: len(site.VideoHosts),
-			CanImages:  canImg,
-			CanVideo:   canVid,
 			Media:      media,
 			Mode:       sc.Mode,
 			Inherits:   site.Schedule.Mode == "" || site.Schedule.Mode == "inherit",
@@ -709,17 +687,15 @@ func (e *Engine) status() statusResp {
 		})
 	}
 	return statusResp{
-		Version:     version,
-		UpdateReady: updateReadyVersion(),
-		LockedDown:  lockdownActive(),
-		DelayHours:  e.cfg.DelayHours,
-		Now:         now.Format("2006-01-02 15:04:05 Mon"),
-		NetTimeOK:   netOK,
-		Categories:  cats,
-		Sites:       sites,
-		CustomBlock: e.cfg.CustomBlock,
-		Allow:       e.cfg.Allow,
-		Pending:     pend,
+		DelayHours:     e.cfg.DelayHours,
+		Now:            now.Format("2006-01-02 15:04:05 Mon"),
+		NetTimeOK:      netOK,
+		FilteringAdult: filteringAdult,
+		Categories:     cats,
+		Sites:          sites,
+		CustomBlock:    e.cfg.CustomBlock,
+		Allow:          e.cfg.Allow,
+		Pending:        pend,
 	}
 }
 
@@ -775,7 +751,7 @@ type program struct{ e *Engine }
 
 func (p *program) Start(s service.Service) error {
 	p.e = &Engine{}
-	logf("service starting")
+	logf("service starting (pid check)…")
 	if err := p.e.run(); err != nil { // must not block
 		logf("START FAILED: %v", err)
 		return err
@@ -939,21 +915,19 @@ Edit schedules/domains in:  %ProgramData%\SelfGuard\config.json
 
 // ---- install ----
 
-// installDir is where the service binary lives once installed: C:\SelfGuard.
-// It's created during an elevated install, so it inherits the C:\ root ACL
-// where standard users get read & execute but not write — meaning a standard
-// user still can't replace or delete the binary the SYSTEM service runs.
-// (Program Files would be marginally stricter, but this fixed, predictable path
-// keeps the recovery docs and scripts pointed at one stable location.)
+// installDir is where the service binary lives once installed. Program Files
+// is writable only by administrators, so a standard user can't replace or
+// delete the binary the SYSTEM service runs. (A user-writable service binary
+// would let them disable filtering at the next boot, and run code as SYSTEM.)
 func installDir() string {
-	sd := os.Getenv("SystemDrive")
-	if sd == "" {
-		sd = "C:"
+	pf := os.Getenv("ProgramFiles")
+	if pf == "" {
+		pf = `C:\Program Files`
 	}
-	return sd + `\` + appName // e.g. C:\SelfGuard
+	return filepath.Join(pf, appName)
 }
 
-func installedExe() string { return installDir() + `\selfguard-svc.exe` }
+func installedExe() string { return filepath.Join(installDir(), "selfguard-svc.exe") }
 
 // install copies this exe into installDir and installs/starts the service
 // from there. Re-running it on an existing install updates the binary and

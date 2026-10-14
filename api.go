@@ -51,6 +51,7 @@ type catStatus struct {
 	Enabled    bool   `json:"enabled"`
 	BlockedNow bool   `json:"blocked_now"`
 	Domains    int    `json:"domains"`
+	ListEmpty  bool   `json:"list_empty"` // true when a downloaded blocklist failed to load
 	Mode       string `json:"mode"`
 }
 
@@ -68,8 +69,6 @@ type siteStatus struct {
 	MediaCount int      `json:"media_count"` // total image+video hosts
 	ImageCount int      `json:"image_count"`
 	VideoCount int      `json:"video_count"`
-	CanImages  bool     `json:"can_images"`
-	CanVideo   bool     `json:"can_video"`
 	Media      []string `json:"media"`
 	Mode       string   `json:"mode"`        // effective schedule mode
 	Inherits   bool     `json:"inherits"`    // uses the social category schedule
@@ -78,17 +77,15 @@ type siteStatus struct {
 }
 
 type statusResp struct {
-	Version     string          `json:"version"`
-	UpdateReady string          `json:"update_ready"` // staged version awaiting install, or ""
-	LockedDown  bool            `json:"locked_down"`  // device hardening applied
-	DelayHours  float64         `json:"delay_hours"`
-	Now         string          `json:"now"`
-	NetTimeOK   bool            `json:"net_time_ok"`
-	Categories  []catStatus     `json:"categories"`
-	Sites       []siteStatus    `json:"sites"`
-	CustomBlock []string        `json:"custom_block"`
-	Allow       []string        `json:"allow"`
-	Pending     []pendingStatus `json:"pending"`
+	DelayHours     float64         `json:"delay_hours"`
+	Now            string          `json:"now"`
+	NetTimeOK      bool            `json:"net_time_ok"`
+	FilteringAdult bool            `json:"filtering_adult"` // adult blocklist actually loaded?
+	Categories     []catStatus     `json:"categories"`
+	Sites          []siteStatus    `json:"sites"`
+	CustomBlock    []string        `json:"custom_block"`
+	Allow          []string        `json:"allow"`
+	Pending        []pendingStatus `json:"pending"`
 }
 
 func apiGetStatus() (*statusResp, error) {
