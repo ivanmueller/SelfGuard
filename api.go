@@ -86,6 +86,12 @@ type statusResp struct {
 	CustomBlock    []string        `json:"custom_block"`
 	Allow          []string        `json:"allow"`
 	Pending        []pendingStatus `json:"pending"`
+	// Restored in 1.8.2: the GUI reads these to show the service version (vs its
+	// own), the lockdown badge, and any staged update. Without them the GUI shows
+	// "service v? - reopen to finish update" and a stale "Lock down" button.
+	Version     string `json:"version"`
+	LockedDown  bool   `json:"locked_down"`
+	UpdateReady string `json:"update_ready,omitempty"`
 }
 
 func apiGetStatus() (*statusResp, error) {

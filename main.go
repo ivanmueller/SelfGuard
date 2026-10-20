@@ -696,6 +696,9 @@ func (e *Engine) status() statusResp {
 		CustomBlock:    e.cfg.CustomBlock,
 		Allow:          e.cfg.Allow,
 		Pending:        pend,
+		Version:        version,
+		LockedDown:     lockdownActive(),
+		UpdateReady:    updateReadyVersion(),
 	}
 }
 
