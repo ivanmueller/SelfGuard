@@ -91,7 +91,7 @@ type statusResp struct {
 	// "service v? - reopen to finish update" and a stale "Lock down" button.
 	Version     string `json:"version"`
 	LockedDown  bool   `json:"locked_down"`
-	UpdateReady string `json:"update_ready,omitempty"`
+	UpdateReady string `json:"update_ready"`
 }
 
 func apiGetStatus() (*statusResp, error) {

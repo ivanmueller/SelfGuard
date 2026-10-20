@@ -479,6 +479,15 @@ func (e *Engine) handleCommand(kind, payload string) (string, error) {
 		_ = e.cfg.Save()
 		return "Pending change cancelled.", nil
 
+	case "lock_down":
+		// Device hardening is a STRICTER change -> immediate. Runs as the service
+		// (SYSTEM), the only account that can set the hardened service SDDL and the
+		// read-only folder ACL.
+		if err := applyLockdown(); err != nil {
+			return "", fmt.Errorf("lock down failed: %w", err)
+		}
+		return "Device locked down.", nil
+
 	// ---------- delay-locked: these make things LOOSER ----------
 	case "disable_category":
 		if _, ok := e.cfg.Categories[payload]; !ok {
@@ -923,11 +932,14 @@ Edit schedules/domains in:  %ProgramData%\SelfGuard\config.json
 // delete the binary the SYSTEM service runs. (A user-writable service binary
 // would let them disable filtering at the next boot, and run code as SYSTEM.)
 func installDir() string {
-	pf := os.Getenv("ProgramFiles")
-	if pf == "" {
-		pf = `C:\Program Files`
+	// The program lives at %SystemDrive%\SelfGuard (e.g. C:\SelfGuard), set up by
+	// the hardening script. This MUST match where the exes actually are, or the
+	// lockdown check, updater, and lock command point at the wrong folder.
+	sd := os.Getenv("SystemDrive")
+	if sd == "" {
+		sd = "C:"
 	}
-	return filepath.Join(pf, appName)
+	return filepath.Join(sd+`\`, appName)
 }
 
 func installedExe() string { return filepath.Join(installDir(), "selfguard-svc.exe") }
